@@ -1,71 +1,141 @@
 <template>
   <div class="app-container">
     <header class="app-header">
-      <div class="header-top">
-        <h1 class="app-title">🇫🇷 Conjugaison française</h1>
-        <button class="theme-toggle" @click="cycleTheme" :title="themeLabel">
-          {{ themeIcon }}
+      <div class="header-left">
+        <button
+          v-if="!isHome"
+          class="back-btn"
+          @click="navigate('/')"
+          title="Retour à l'accueil"
+        >
+          ← Accueil
+        </button>
+        <button
+          v-else
+          class="logo-btn"
+          @click="navigate('/')"
+        >
+          🇫🇷 <span class="logo-text">Apprendre le français</span>
         </button>
       </div>
-      <p class="app-subtitle">{{ tempsList.length }} temps · Niveau B1+</p>
+
+      <nav v-if="breadcrumbs.length > 0" class="breadcrumbs">
+        <template v-for="(b, i) in breadcrumbs" :key="i">
+          <button
+            v-if="b.path"
+            class="crumb crumb-link"
+            @click="navigate(b.path)"
+          >{{ b.label }}</button>
+          <span v-else class="crumb crumb-current">{{ b.label }}</span>
+          <span v-if="i < breadcrumbs.length - 1" class="crumb-sep">›</span>
+        </template>
+      </nav>
+
+      <button class="theme-toggle" @click="cycleTheme" :title="themeLabel">
+        {{ themeIcon }}
+      </button>
     </header>
 
-    <nav class="tab-bar">
-      <button
-        class="tab-btn"
-        :class="{ active: view === 'conjugaison' }"
-        @click="switchView('conjugaison')"
-      >
-        📋 Tableaux
-      </button>
-      <button
-        class="tab-btn explorer"
-        :class="{ active: view === 'explorer' }"
-        @click="switchView('explorer')"
-      >
-        🔎 Explorer
-      </button>
-      <button
-        class="tab-btn guide"
-        :class="{ active: view === 'guide' }"
-        @click="switchView('guide')"
-      >
-        📖 Guide
-      </button>
-    </nav>
-
-    <main>
-      <ExplorerView v-if="view === 'explorer'" />
-      <GuideView v-if="view === 'guide'" />
-
-      <ConjugationTable
-        v-if="view === 'conjugaison'"
-        :search="search"
-        :selectedVerb="selectedVerb"
-        :selectedTemps="selectedTemps"
-        :quizMode="quizMode"
-        :quizAnswers="quizAnswers"
-        :showResults="showResults"
-        @update:search="onSearch"
-        @selectVerb="onSelectVerb"
-        @selectTemps="onSelectTemps"
-        @toggleQuiz="onToggleQuiz"
-        @updateAnswer="onUpdateAnswer"
-        @check="showResults = true"
-        @restart="startQuiz"
-      />
+    <main class="app-main">
+      <component :is="currentPage.component" v-bind="currentPage.props || {}" />
     </main>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { verbNames, tempsList } from './data/verbs.js'
-import GuideView from './components/GuideView.vue'
-import ConjugationTable from './components/ConjugationTable.vue'
-import ExplorerView from './components/ExplorerView.vue'
+import { useRouter, navigate } from './composables/useRouter.js'
 
-// Theme: 'system' | 'light' | 'dark'
+import HomePage from './pages/HomePage.vue'
+import ConjugationPage from './pages/ConjugationPage.vue'
+import TcfPage from './pages/TcfPage.vue'
+import ExpressionEcrite from './pages/tcf/ExpressionEcrite.vue'
+import ComingSoon from './pages/tcf/ComingSoon.vue'
+
+const { route } = useRouter()
+
+// --- Routage (basé sur le hash) ---
+const currentPage = computed(() => {
+  const segs = route.value.segments
+  if (segs.length === 0) return { component: HomePage }
+  if (segs[0] === 'conjugaison') return { component: ConjugationPage }
+  if (segs[0] === 'tcf') {
+    if (segs.length === 1) return { component: TcfPage }
+    if (segs[1] === 'ee') return { component: ExpressionEcrite }
+    if (segs[1] === 'co') return {
+      component: ComingSoon,
+      props: {
+        icon: '🎧',
+        title: 'Compréhension orale (CO)',
+        subtitle: "39 questions QCM, ~25 minutes. Extraits audio courts à plus longs.",
+        features: [
+          'Lecteur audio avec contrôle de la lecture',
+          'Banque de questions au format TCF',
+          'Score immédiat et explications',
+          'Minuteur identique à l\'examen'
+        ]
+      }
+    }
+    if (segs[1] === 'ce') return {
+      component: ComingSoon,
+      props: {
+        icon: '📖',
+        title: 'Compréhension écrite (CE)',
+        subtitle: '39 questions QCM, ~45 minutes.',
+        features: [
+          "Textes typiques de l'examen (annonces, articles, courriers)",
+          'Questions chronométrées',
+          'Score immédiat et corrigés',
+          'Mode entraînement libre'
+        ]
+      }
+    }
+    if (segs[1] === 'eo') return {
+      component: ComingSoon,
+      props: {
+        icon: '🎤',
+        title: 'Expression orale (EO)',
+        subtitle: "Trois tâches enregistrées, ~12 minutes.",
+        features: [
+          "Enregistrement audio dans le navigateur",
+          'Sujets au format TCF (entretien, échange, opinion)',
+          'Minuteur par tâche',
+          'Lecture et conservation de vos enregistrements'
+        ]
+      }
+    }
+    return { component: TcfPage }
+  }
+  // Route inconnue : on revient à l'accueil
+  return { component: HomePage }
+})
+
+const isHome = computed(() => route.value.segments.length === 0)
+
+const breadcrumbs = computed(() => {
+  const segs = route.value.segments
+  if (segs.length === 0) return []
+  const crumbs = [{ label: 'Accueil', path: '/' }]
+  if (segs[0] === 'conjugaison') {
+    crumbs.push({ label: 'Conjugaison' })
+  } else if (segs[0] === 'tcf') {
+    if (segs.length === 1) {
+      crumbs.push({ label: 'TCF' })
+    } else {
+      crumbs.push({ label: 'TCF', path: '/tcf' })
+      const map = {
+        ee: 'Expression écrite',
+        eo: 'Expression orale',
+        co: 'Compréhension orale',
+        ce: 'Compréhension écrite'
+      }
+      crumbs.push({ label: map[segs[1]] || segs[1] })
+    }
+  }
+  return crumbs
+})
+
+// --- Thème : 'system' | 'light' | 'dark' ---
 const theme = ref(localStorage.getItem('theme') || 'system')
 
 const themeIcon = computed(() => {
@@ -88,66 +158,13 @@ function cycleTheme() {
 
 function applyTheme(t) {
   const root = document.documentElement
-  if (t === 'system') {
-    root.removeAttribute('data-theme')
-  } else {
-    root.setAttribute('data-theme', t)
-  }
+  if (t === 'system') root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', t)
   localStorage.setItem('theme', t)
 }
 
 watch(theme, applyTheme)
 onMounted(() => applyTheme(theme.value))
-
-const view = ref('conjugaison')
-const search = ref('')
-const selectedVerb = ref('être')
-const selectedTemps = ref('présent')
-const quizMode = ref(false)
-const quizAnswers = ref({})
-const showResults = ref(false)
-
-function switchView(v) {
-  view.value = v
-  quizMode.value = false
-}
-
-function onSearch(val) {
-  search.value = val
-  quizMode.value = false
-  showResults.value = false
-}
-
-function onSelectVerb(v) {
-  selectedVerb.value = v
-  quizMode.value = false
-  showResults.value = false
-  quizAnswers.value = {}
-}
-
-function onSelectTemps(t) {
-  selectedTemps.value = t
-  showResults.value = false
-  quizAnswers.value = {}
-}
-
-function startQuiz() {
-  quizMode.value = true
-  quizAnswers.value = {}
-  showResults.value = false
-}
-
-function onToggleQuiz() {
-  if (quizMode.value) {
-    quizMode.value = false
-  } else {
-    startQuiz()
-  }
-}
-
-function onUpdateAnswer(i, val) {
-  quizAnswers.value = { ...quizAnswers.value, [i]: val }
-}
 </script>
 
 <style scoped>
@@ -161,29 +178,81 @@ function onUpdateAnswer(i, val) {
 }
 
 .app-header {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.header-top {
   display: flex;
-  justify-content: center;
   align-items: center;
-  position: relative;
+  gap: 10px;
+  margin-bottom: 22px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
-.app-title {
-  font-size: 26px;
+.header-left { flex-shrink: 0; }
+
+.logo-btn {
+  background: transparent;
+  border: none;
+  font-size: 18px;
   font-weight: 700;
   color: var(--title-color);
-  margin-bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+.logo-btn:hover { background: var(--surface-alt); }
+.logo-text {
+  font-size: 16px;
+  letter-spacing: -0.3px;
 }
 
+.back-btn {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+.back-btn:hover {
+  border-color: #2980b9;
+  color: #2980b9;
+}
+
+.breadcrumbs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.crumb {
+  font-family: inherit;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.crumb-link {
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.crumb-link:hover { color: #2980b9; background: var(--surface-alt); }
+.crumb-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.crumb-sep { color: var(--text-faintest); }
+
 .theme-toggle {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  margin-left: auto;
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: 10px;
@@ -191,71 +260,14 @@ function onUpdateAnswer(i, val) {
   font-size: 18px;
   line-height: 1;
   transition: all 0.2s;
+  flex-shrink: 0;
 }
-
 .theme-toggle:hover {
   border-color: #2980b9;
   box-shadow: 0 2px 8px var(--shadow-sm);
 }
 
-.app-subtitle {
-  font-size: 13px;
-  color: var(--text-faint);
-}
-
-.tab-bar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.tab-btn {
-  flex: 1;
-  padding: 12px 0;
-  border-radius: 14px;
-  border: 1.5px solid var(--border);
-  background: var(--surface);
-  font-weight: 500;
-  font-size: 14px;
-  color: var(--text-muted);
-  transition: all 0.2s;
-}
-
-.tab-btn:hover {
-  border-color: #2980b9;
-  color: #2980b9;
-}
-
-.tab-btn.active {
-  border-color: #2980b9;
-  background: var(--tab-conj-bg);
-  color: #2980b9;
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(41, 128, 185, 0.12);
-}
-
-.tab-btn.explorer:hover {
-  border-color: #27ae60;
-  color: #27ae60;
-}
-
-.tab-btn.explorer.active {
-  border-color: #27ae60;
-  background: #27ae6012;
-  color: #27ae60;
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.12);
-}
-
-.tab-btn.guide:hover {
-  border-color: #e67e22;
-  color: #e67e22;
-}
-
-.tab-btn.guide.active {
-  border-color: #e67e22;
-  background: var(--tab-guide-bg);
-  color: #e67e22;
-  box-shadow: 0 2px 8px rgba(230, 126, 34, 0.12);
+.app-main {
+  animation: fadeIn 0.25s ease;
 }
 </style>
