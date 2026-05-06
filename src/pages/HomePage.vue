@@ -93,6 +93,16 @@ const modules = [
     badge: '4 épreuves'
   },
   {
+    id: 'correcteur',
+    icon: '📝',
+    title: 'Correcteur',
+    description: "Corrige tes phrases avec Claude : explications et corrections une à une.",
+    features: ['Erreurs surlignées', 'Explications au survol', 'Corriger une à une', 'Tout corriger en un clic'],
+    color: '#c0392b',
+    path: '/correcteur',
+    badge: 'IA'
+  },
+  {
     id: 'vocab',
     icon: '📚',
     title: 'Vocabulaire',

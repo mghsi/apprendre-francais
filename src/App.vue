@@ -51,6 +51,7 @@ import ConjugationPage from './pages/ConjugationPage.vue'
 import TcfPage from './pages/TcfPage.vue'
 import ExpressionEcrite from './pages/tcf/ExpressionEcrite.vue'
 import ComingSoon from './pages/tcf/ComingSoon.vue'
+import GrammarCorrector from './pages/GrammarCorrector.vue'
 
 const { route } = useRouter()
 
@@ -59,6 +60,7 @@ const currentPage = computed(() => {
   const segs = route.value.segments
   if (segs.length === 0) return { component: HomePage }
   if (segs[0] === 'conjugaison') return { component: ConjugationPage }
+  if (segs[0] === 'correcteur') return { component: GrammarCorrector }
   if (segs[0] === 'tcf') {
     if (segs.length === 1) return { component: TcfPage }
     if (segs[1] === 'ee') return { component: ExpressionEcrite }
@@ -118,6 +120,8 @@ const breadcrumbs = computed(() => {
   const crumbs = [{ label: 'Accueil', path: '/' }]
   if (segs[0] === 'conjugaison') {
     crumbs.push({ label: 'Conjugaison' })
+  } else if (segs[0] === 'correcteur') {
+    crumbs.push({ label: 'Correcteur' })
   } else if (segs[0] === 'tcf') {
     if (segs.length === 1) {
       crumbs.push({ label: 'TCF' })
