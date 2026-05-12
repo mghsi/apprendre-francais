@@ -137,12 +137,31 @@
         </button>
       </div>
     </div>
+
+    <!-- Correcteur grammatical Claude (mêmes corrections que la page /correcteur) -->
+    <section class="corrector-section">
+      <header class="corrector-header">
+        <h3 class="corrector-title">📝 Correcteur Claude</h3>
+        <p class="corrector-subtitle">
+          Analyse ta réponse en place : Claude marque les
+          <span class="legend legend-error">erreurs</span> et propose des
+          <span class="legend legend-suggestion">recommandations B2+</span>.
+          Chaque correction appliquée met à jour ton texte ci-dessus.
+        </p>
+      </header>
+      <GrammarCorrectionPanel
+        :key="`gc-${currentTaskId}`"
+        v-model:text="answers[currentTaskId]"
+        analyse-label="✨ Corriger ma réponse avec Claude"
+      />
+    </section>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, reactive } from 'vue'
 import { tcfTasks, accentKeys } from '../../data/writingPrompts.js'
+import GrammarCorrectionPanel from '../../components/GrammarCorrectionPanel.vue'
 
 const STORAGE_KEY = 'tcf-writing-drafts-v2'
 
@@ -663,4 +682,32 @@ onBeforeUnmount(() => {
   border-color: #8e44ad;
   color: #8e44ad;
 }
+
+/* Section correcteur (intégré sous l'éditeur) */
+.corrector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1.5px dashed var(--border);
+}
+.corrector-header { padding: 0 2px; }
+.corrector-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--title-color);
+  margin-bottom: 4px;
+}
+.corrector-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.legend {
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.legend-error { background: #c0392b18; color: #c0392b; }
+.legend-suggestion { background: #f1c40f33; color: #b7950b; }
 </style>
