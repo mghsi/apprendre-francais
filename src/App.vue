@@ -50,6 +50,7 @@ import HomePage from './pages/HomePage.vue'
 import ConjugationPage from './pages/ConjugationPage.vue'
 import TcfPage from './pages/TcfPage.vue'
 import ExpressionEcrite from './pages/tcf/ExpressionEcrite.vue'
+import ComprehensionEcrite from './pages/tcf/ComprehensionEcrite.vue'
 import ComingSoon from './pages/tcf/ComingSoon.vue'
 import GrammarCorrector from './pages/GrammarCorrector.vue'
 
@@ -78,20 +79,7 @@ const currentPage = computed(() => {
         ]
       }
     }
-    if (segs[1] === 'ce') return {
-      component: ComingSoon,
-      props: {
-        icon: '📖',
-        title: 'Compréhension écrite (CE)',
-        subtitle: '39 questions QCM, ~45 minutes.',
-        features: [
-          "Textes typiques de l'examen (annonces, articles, courriers)",
-          'Questions chronométrées',
-          'Score immédiat et corrigés',
-          'Mode entraînement libre'
-        ]
-      }
-    }
+    if (segs[1] === 'ce') return { component: ComprehensionEcrite }
     if (segs[1] === 'eo') return {
       component: ComingSoon,
       props: {

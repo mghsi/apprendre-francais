@@ -63,7 +63,7 @@ const skills = [
     icon: '📖',
     color: '#16a085',
     path: '/tcf/ce',
-    disabled: true
+    disabled: false
   },
   {
     id: 'eo',
