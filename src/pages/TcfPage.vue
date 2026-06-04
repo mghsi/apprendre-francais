@@ -75,7 +75,7 @@ const skills = [
     icon: '🎤',
     color: '#e67e22',
     path: '/tcf/eo',
-    disabled: true
+    disabled: false
   },
   {
     id: 'ee',

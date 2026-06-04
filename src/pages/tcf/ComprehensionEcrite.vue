@@ -593,6 +593,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 /* ------------------------------------------------------------------ */
 const STORAGE_KEY = 'tcf-ce-questions-v1'
 const FINE_STORAGE_KEY = 'tcf-ce-fine-v1'
+const EXAM_STORAGE_KEY = 'tcf-ce-exam-state-v1'
 
 /* ------------------------------------------------------------------ */
 /* Données                                                             */
@@ -1019,29 +1020,49 @@ function syncFineQuestions(item, value) {
 function switchMode(target) {
   if (target === 'exam') {
     if (questions.value.length === 0) return
-    // Reset des réponses utilisateur
+    // Détection d'un examen déjà commencé (temps écoulé ou au moins
+    // une réponse cochée) afin de ne PAS écraser le travail en cours.
+    const hasInProgress =
+      timer.elapsed > 0 ||
+      Object.values(userAnswers).some(v => v != null && v !== '')
+    if (
+      mode.value === 'exam' ||
+      mode.value === 'results' ||
+      hasInProgress
+    ) {
+      mode.value = 'exam'
+      if (timer.running && !timerInterval) startTimer()
+      saveExamState()
+      return
+    }
+    // Démarrer un nouvel examen : reset des réponses + minuteur.
     Object.keys(userAnswers).forEach(k => delete userAnswers[k])
     for (const q of questions.value) userAnswers[q.id] = null
     timer.elapsed = 0
     startTimer()
     mode.value = 'exam'
+    saveExamState()
     return
   }
   if (target === 'edit') {
-    stopTimer()
+    // L'examen est mis en pause mais ses réponses restent en mémoire / disque.
+    pauseTimerKeep()
     mode.value = 'edit'
+    saveExamState()
     return
   }
   if (target === 'fine') {
-    stopTimer()
+    pauseTimerKeep()
     mode.value = 'fine'
+    saveExamState()
     return
   }
 }
 
 function finishExam() {
-  stopTimer()
+  pauseTimerKeep()
   mode.value = 'results'
+  saveExamState()
 }
 
 function restartExam() {
@@ -1050,6 +1071,7 @@ function restartExam() {
   timer.elapsed = 0
   startTimer()
   mode.value = 'exam'
+  saveExamState()
 }
 
 const score = computed(() => {
@@ -1101,26 +1123,39 @@ function startTimer() {
   timer.running = true
   if (timerInterval) clearInterval(timerInterval)
   timerInterval = setInterval(() => {
-    if (timer.running) timer.elapsed++
+    if (timer.running) {
+      timer.elapsed++
+      // Sauvegarde toutes les 5 s pour limiter les écritures.
+      if (timer.elapsed % 5 === 0) saveExamState()
+    }
   }, 1000)
 }
 
-function stopTimer() {
-  timer.running = false
+// Arrête le tick mais conserve l'état logique (running peut rester true
+// lorsque l'utilisateur quitte temporairement la vue examen).
+function pauseTimerKeep() {
   if (timerInterval) {
     clearInterval(timerInterval)
     timerInterval = null
   }
 }
 
+// Arrêt complet : tick stoppé et drapeau running mis à false.
+function stopTimer() {
+  timer.running = false
+  pauseTimerKeep()
+}
+
 function toggleTimer() {
   timer.running = !timer.running
   if (timer.running && !timerInterval) startTimer()
+  saveExamState()
 }
 
 function resetTimer() {
   if (!window.confirm('Réinitialiser le minuteur à 00:00 ?')) return
   timer.elapsed = 0
+  saveExamState()
 }
 
 function formatTime(s) {
@@ -1218,11 +1253,106 @@ function saveFineToStorage() {
 
 watch(fineItems, saveFineToStorage, { deep: true })
 
+/* ------------------------------------------------------------------ */
+/* Persistance de l'examen en cours (réponses + minuteur + mode)      */
+/* ------------------------------------------------------------------ */
+function saveExamState() {
+  try {
+    // On ne sauvegarde qu'un instantané utile : pas de questions, juste
+    // ce qui peut être perdu si la page se ferme / le Mac se met en veille.
+    const state = {
+      mode: mode.value,
+      userAnswers: { ...userAnswers },
+      timerElapsed: timer.elapsed,
+      timerRunning: timer.running,
+      savedAt: Date.now()
+    }
+    localStorage.setItem(EXAM_STORAGE_KEY, JSON.stringify(state))
+  } catch (e) {
+    console.warn('CE: échec de sauvegarde de l\'état examen', e)
+  }
+}
+
+function loadExamState() {
+  try {
+    const raw = localStorage.getItem(EXAM_STORAGE_KEY)
+    if (!raw) return
+    const state = JSON.parse(raw)
+    if (!state || typeof state !== 'object') return
+
+    // Restauration du minuteur (en pause par défaut pour ne pas compter
+    // le temps passé hors page).
+    if (typeof state.timerElapsed === 'number' && state.timerElapsed >= 0) {
+      timer.elapsed = state.timerElapsed
+    }
+    timer.running = false  // toujours en pause au retour
+
+    // Restauration des réponses : on ne garde que les clés qui
+    // correspondent à des questions existantes pour éviter les fantômes.
+    if (state.userAnswers && typeof state.userAnswers === 'object') {
+      const validIds = new Set(questions.value.map(q => q.id))
+      for (const [qid, ans] of Object.entries(state.userAnswers)) {
+        if (validIds.has(qid)) userAnswers[qid] = ans
+      }
+    }
+
+    // Restauration du mode : si l'utilisateur était en examen ou
+    // résultats, on retourne à cette vue.
+    if (
+      (state.mode === 'exam' || state.mode === 'results') &&
+      questions.value.length > 0
+    ) {
+      mode.value = state.mode
+    } else if (state.mode === 'fine' || state.mode === 'edit') {
+      mode.value = state.mode
+    }
+  } catch (e) {
+    console.warn('CE: échec de chargement de l\'état examen', e)
+  }
+}
+
+// Sauvegarde automatique sur changements de mode / réponses / minuteur.
+watch(mode, saveExamState)
+watch(userAnswers, saveExamState, { deep: true })
+watch(() => timer.elapsed, () => { /* géré par startTimer toutes les 5 s */ })
+
+// Filet de sécurité : sauvegarder quand l'onglet devient invisible
+// (utile sur macOS qui peut suspendre le processus quand l'écran s'éteint).
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') saveExamState()
+}
+
+function onBeforeUnload() {
+  saveExamState()
+}
+
 onMounted(() => {
   loadFromStorage()
   loadFineFromStorage()
+  // Important : on restaure l'état examen APRÈS les questions, sinon
+  // on ne peut pas filtrer les réponses par ID valide.
+  loadExamState()
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibilityChange)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', onBeforeUnload)
+    window.addEventListener('pagehide', onBeforeUnload)
+  }
 })
-onBeforeUnmount(() => stopTimer())
+
+onBeforeUnmount(() => {
+  // Dernière sauvegarde avant démontage du composant.
+  saveExamState()
+  stopTimer()
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('beforeunload', onBeforeUnload)
+    window.removeEventListener('pagehide', onBeforeUnload)
+  }
+})
 </script>
 
 <style scoped>

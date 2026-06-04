@@ -6,8 +6,11 @@
 // ---------
 // POST /api/correct  body: { text: string }
 //   Returns: { original, errors: [{ original, corrected, explanation, type }], fullyCorrected }
+// POST /api/eo/vocab body: { theme: string }
+//   Returns: { theme, level, nouns, verbs, adjectives, connectors, expressions, pitfalls }
 
 import { correctFrenchText } from './claudeCorrect.js'
+import { generateVocab } from './claudeVocab.js'
 
 async function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -44,6 +47,21 @@ function attach(server) {
       const msg = err?.message || 'Erreur inattendue'
       // eslint-disable-next-line no-console
       console.error('[/api/correct]', msg)
+      sendJson(res, 500, { error: msg })
+    }
+  })
+
+  server.middlewares.use('/api/eo/vocab', async (req, res, next) => {
+    if (req.method !== 'POST') return next()
+    try {
+      const body = await readJsonBody(req)
+      const theme = typeof body?.theme === 'string' ? body.theme : ''
+      const result = await generateVocab(theme)
+      sendJson(res, 200, result)
+    } catch (err) {
+      const msg = err?.message || 'Erreur inattendue'
+      // eslint-disable-next-line no-console
+      console.error('[/api/eo/vocab]', msg)
       sendJson(res, 500, { error: msg })
     }
   })

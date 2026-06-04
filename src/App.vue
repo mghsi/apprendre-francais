@@ -50,6 +50,7 @@ import HomePage from './pages/HomePage.vue'
 import ConjugationPage from './pages/ConjugationPage.vue'
 import TcfPage from './pages/TcfPage.vue'
 import ExpressionEcrite from './pages/tcf/ExpressionEcrite.vue'
+import ExpressionOrale from './pages/tcf/ExpressionOrale.vue'
 import ComprehensionEcrite from './pages/tcf/ComprehensionEcrite.vue'
 import ComingSoon from './pages/tcf/ComingSoon.vue'
 import GrammarCorrector from './pages/GrammarCorrector.vue'
@@ -80,20 +81,7 @@ const currentPage = computed(() => {
       }
     }
     if (segs[1] === 'ce') return { component: ComprehensionEcrite }
-    if (segs[1] === 'eo') return {
-      component: ComingSoon,
-      props: {
-        icon: '🎤',
-        title: 'Expression orale (EO)',
-        subtitle: "Trois tâches enregistrées, ~12 minutes.",
-        features: [
-          "Enregistrement audio dans le navigateur",
-          'Sujets au format TCF (entretien, échange, opinion)',
-          'Minuteur par tâche',
-          'Lecture et conservation de vos enregistrements'
-        ]
-      }
-    }
+    if (segs[1] === 'eo') return { component: ExpressionOrale }
     return { component: TcfPage }
   }
   // Route inconnue : on revient à l'accueil

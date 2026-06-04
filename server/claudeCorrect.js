@@ -305,7 +305,11 @@ export async function correctFrenchText(text) {
   const { headers, isOAuth } = buildHeaders(token)
   const body = {
     model: DEFAULT_MODEL,
-    max_tokens: 2500,
+    // Long essays (e.g. TCF Tâche 3 ≥ 180 mots) can produce many
+    // error+suggestion entries. A small cap truncates the JSON mid-array
+    // and makes JSON.parse fail. Give the model plenty of room.
+    // claude-sonnet-4-5 supports up to 64k output tokens.
+    max_tokens: 16000,
     temperature: 0,
     system: buildSystem(isOAuth),
     messages: [
@@ -335,6 +339,7 @@ export async function correctFrenchText(text) {
   }
   const json = await res.json()
   const piece = json?.content?.[0]?.text ?? ''
+  const stopReason = json?.stop_reason
   // The prefill of "{" is not echoed in the response body, so we add it
   // back to make a valid JSON document.
   const reconstructed = '{' + piece
@@ -344,6 +349,13 @@ export async function correctFrenchText(text) {
   } catch {
     const extracted = extractJsonObject(reconstructed)
     if (!extracted) {
+      if (stopReason === 'max_tokens') {
+        throw new Error(
+          "La réponse du modèle a été tronquée (limite max_tokens atteinte). " +
+            'Essaie un texte plus court ou augmente max_tokens dans ' +
+            'server/claudeCorrect.js.'
+        )
+      }
       throw new Error(
         'Réponse du modèle non parsable comme JSON. Sortie brute : ' +
           reconstructed.slice(0, 400)
