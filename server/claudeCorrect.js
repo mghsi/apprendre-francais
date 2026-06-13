@@ -1,22 +1,8 @@
-// Server-side helper that calls Anthropic's Messages API to obtain
-// a structured grammar-correction response for a French sentence.
-//
-// Authentication
-// --------------
-// We support two kinds of tokens, picked up from environment variables:
-//   1. CLAUDE_CODE_OAUTH_TOKEN  – an OAuth token (starts with "sk-ant-oat...")
-//      issued by Anthropic Claude Code. Sent as Authorization: Bearer <token>
-//      with the anthropic-beta: oauth-2025-04-20 header. The system prompt
-//      MUST start with the Claude Code identity block.
-//   2. ANTHROPIC_API_KEY – a regular API key (sent via x-api-key).
-//
-// The OAuth token is preferred ("first try", per the user request).
+// Server-side helper that obtains a structured grammar-correction response
+// for a French sentence. The actual LLM call (DeepSeek or Anthropic) is
+// delegated to server/llm.js, which picks the provider from env vars.
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-const DEFAULT_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'
-
-const CLAUDE_CODE_IDENTITY =
-  "You are Claude Code, Anthropic's official CLI for Claude."
+import { chatJson, extractJsonObject } from './llm.js'
 
 const SYSTEM_INSTRUCTION = `Tu es un professeur de français exigeant et bienveillant.
 L'apprenant prépare le TCF et vise le niveau B2+ (proche du C1) à l'épreuve
@@ -131,61 +117,6 @@ Schéma JSON attendu :
   "fully_corrected": string
 }`
 
-function buildHeaders(token) {
-  const isOAuth = token.startsWith('sk-ant-oat')
-  const headers = {
-    'content-type': 'application/json',
-    'anthropic-version': '2023-06-01',
-  }
-  if (isOAuth) {
-    headers['authorization'] = `Bearer ${token}`
-    headers['anthropic-beta'] = 'oauth-2025-04-20'
-  } else {
-    headers['x-api-key'] = token
-  }
-  return { headers, isOAuth }
-}
-
-function buildSystem(isOAuth) {
-  // When using an OAuth token, the system prompt must start with the
-  // Claude Code identity sentence. We send the system as an array of
-  // text blocks so the identity stays first while still delivering our
-  // domain instructions.
-  if (isOAuth) {
-    return [
-      { type: 'text', text: CLAUDE_CODE_IDENTITY },
-      { type: 'text', text: SYSTEM_INSTRUCTION },
-    ]
-  }
-  return SYSTEM_INSTRUCTION
-}
-
-// Extract the first balanced JSON object from a string. Useful when the
-// model wraps the JSON in extra prose despite being asked not to.
-function extractJsonObject(text) {
-  const start = text.indexOf('{')
-  if (start < 0) return null
-  let depth = 0
-  let inString = false
-  let escape = false
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      if (escape) escape = false
-      else if (ch === '\\') escape = true
-      else if (ch === '"') inString = false
-    } else {
-      if (ch === '"') inString = true
-      else if (ch === '{') depth++
-      else if (ch === '}') {
-        depth--
-        if (depth === 0) return text.slice(start, i + 1)
-      }
-    }
-  }
-  return null
-}
-
 function spansOverlap(a, b) {
   return !(a[1] <= b[0] || a[0] >= b[1])
 }
@@ -292,57 +223,19 @@ export async function correctFrenchText(text) {
   if (typeof text !== 'string' || !text.trim()) {
     throw new Error('Le texte est vide.')
   }
-  const token =
-    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-    process.env.ANTHROPIC_API_KEY ||
-    ''
-  if (!token) {
-    throw new Error(
-      "Aucun token Claude trouvé. Définis CLAUDE_CODE_OAUTH_TOKEN " +
-        '(ou ANTHROPIC_API_KEY) dans ton environnement.'
-    )
-  }
-  const { headers, isOAuth } = buildHeaders(token)
-  const body = {
-    model: DEFAULT_MODEL,
-    // Long essays (e.g. TCF Tâche 3 ≥ 180 mots) can produce many
-    // error+suggestion entries. A small cap truncates the JSON mid-array
-    // and makes JSON.parse fail. Give the model plenty of room.
-    // claude-sonnet-4-5 supports up to 64k output tokens.
-    max_tokens: 16000,
+  // Long essays (e.g. TCF Tâche 3 ≥ 180 mots) can produce many
+  // error+suggestion entries. A small cap truncates the JSON mid-array
+  // and makes JSON.parse fail, so we ask for a generous token budget.
+  const { text: reconstructed, stopReason } = await chatJson({
+    system: SYSTEM_INSTRUCTION,
+    userContent:
+      'Voici le texte à corriger. Réponds en JSON strict.\n\n' +
+      '<<<TEXTE>>>\n' +
+      text +
+      '\n<<<FIN>>>',
+    maxTokens: 16000,
     temperature: 0,
-    system: buildSystem(isOAuth),
-    messages: [
-      {
-        role: 'user',
-        content:
-          'Voici le texte à corriger. Réponds en JSON strict.\n\n' +
-          '<<<TEXTE>>>\n' +
-          text +
-          '\n<<<FIN>>>',
-      },
-      // Prefill the assistant turn with "{" so the model is forced to
-      // emit a raw JSON object.
-      { role: 'assistant', content: '{' },
-    ],
-  }
-  const res = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '')
-    throw new Error(
-      `Anthropic API ${res.status} ${res.statusText}: ${errBody.slice(0, 400)}`
-    )
-  }
-  const json = await res.json()
-  const piece = json?.content?.[0]?.text ?? ''
-  const stopReason = json?.stop_reason
-  // The prefill of "{" is not echoed in the response body, so we add it
-  // back to make a valid JSON document.
-  const reconstructed = '{' + piece
   let parsed
   try {
     parsed = JSON.parse(reconstructed)

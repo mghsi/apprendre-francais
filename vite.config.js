@@ -10,6 +10,8 @@ const SERVER_ENV_KEYS = [
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
   'CLAUDE_MODEL',
+  'DEEPSEEK_API_KEY',
+  'DEEPSEEK_MODEL',
 ]
 
 // https://vite.dev/config/

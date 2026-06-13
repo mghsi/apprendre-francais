@@ -1,14 +1,8 @@
-// Server-side helper that asks Claude to generate a B2+ thematic vocabulary
-// pack for the TCF Expression Orale (Tâche 3 — expression d'une opinion).
-//
-// Uses the same auth strategy as server/claudeCorrect.js (OAuth token first,
-// API key fallback). The model is asked to return strict JSON.
+// Server-side helper that generates a B2+ thematic vocabulary pack for the
+// TCF Expression Orale (Tâche 3 — expression d'une opinion). The LLM call
+// (DeepSeek or Anthropic) is delegated to server/llm.js.
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-const DEFAULT_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'
-
-const CLAUDE_CODE_IDENTITY =
-  "You are Claude Code, Anthropic's official CLI for Claude."
+import { chatJson, extractJsonObject } from './llm.js'
 
 const SYSTEM_INSTRUCTION = `Tu es un professeur de français spécialisé dans la
 préparation au TCF (épreuve d'Expression Orale, Tâche 3 — expression d'une
@@ -52,55 +46,6 @@ Notes :
     « introduire une concession », « exprimer une conséquence ».
   • "pitfalls" liste 5 erreurs fréquentes d'apprenants sur ce thème
     (faux-amis, anglicismes, mauvaises prépositions, accords typiques).`
-
-function buildHeaders(token) {
-  const isOAuth = token.startsWith('sk-ant-oat')
-  const headers = {
-    'content-type': 'application/json',
-    'anthropic-version': '2023-06-01',
-  }
-  if (isOAuth) {
-    headers['authorization'] = `Bearer ${token}`
-    headers['anthropic-beta'] = 'oauth-2025-04-20'
-  } else {
-    headers['x-api-key'] = token
-  }
-  return { headers, isOAuth }
-}
-
-function buildSystem(isOAuth) {
-  if (isOAuth) {
-    return [
-      { type: 'text', text: CLAUDE_CODE_IDENTITY },
-      { type: 'text', text: SYSTEM_INSTRUCTION },
-    ]
-  }
-  return SYSTEM_INSTRUCTION
-}
-
-function extractJsonObject(text) {
-  const start = text.indexOf('{')
-  if (start < 0) return null
-  let depth = 0
-  let inString = false
-  let escape = false
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      if (escape) escape = false
-      else if (ch === '\\') escape = true
-      else if (ch === '"') inString = false
-    } else {
-      if (ch === '"') inString = true
-      else if (ch === '{') depth++
-      else if (ch === '}') {
-        depth--
-        if (depth === 0) return text.slice(start, i + 1)
-      }
-    }
-  }
-  return null
-}
 
 function asArray(v) {
   return Array.isArray(v) ? v : []
@@ -147,49 +92,17 @@ export async function generateVocab(theme) {
   if (typeof theme !== 'string' || !theme.trim()) {
     throw new Error('Le thème est vide.')
   }
-  const token =
-    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-    process.env.ANTHROPIC_API_KEY ||
-    ''
-  if (!token) {
-    throw new Error(
-      "Aucun token Claude trouvé. Définis CLAUDE_CODE_OAUTH_TOKEN " +
-        '(ou ANTHROPIC_API_KEY) dans ton environnement.'
-    )
-  }
-  const { headers, isOAuth } = buildHeaders(token)
-  const body = {
-    model: DEFAULT_MODEL,
-    max_tokens: 8000,
+  const { text: reconstructed } = await chatJson({
+    system: SYSTEM_INSTRUCTION,
+    userContent:
+      'Génère un dossier lexical B2+ pour le TCF (Tâche 3, expression ' +
+      "d'une opinion) sur le thème suivant. Réponds en JSON strict.\n\n" +
+      '<<<THÈME>>>\n' +
+      theme.trim() +
+      '\n<<<FIN>>>',
+    maxTokens: 8000,
     temperature: 0.3,
-    system: buildSystem(isOAuth),
-    messages: [
-      {
-        role: 'user',
-        content:
-          'Génère un dossier lexical B2+ pour le TCF (Tâche 3, expression ' +
-          'd\'une opinion) sur le thème suivant. Réponds en JSON strict.\n\n' +
-          '<<<THÈME>>>\n' +
-          theme.trim() +
-          '\n<<<FIN>>>',
-      },
-      { role: 'assistant', content: '{' },
-    ],
-  }
-  const res = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '')
-    throw new Error(
-      `Anthropic API ${res.status} ${res.statusText}: ${errBody.slice(0, 400)}`
-    )
-  }
-  const json = await res.json()
-  const piece = json?.content?.[0]?.text ?? ''
-  const reconstructed = '{' + piece
   let parsed
   try {
     parsed = JSON.parse(reconstructed)
