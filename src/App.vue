@@ -52,7 +52,7 @@ import TcfPage from './pages/TcfPage.vue'
 import ExpressionEcrite from './pages/tcf/ExpressionEcrite.vue'
 import ExpressionOrale from './pages/tcf/ExpressionOrale.vue'
 import ComprehensionEcrite from './pages/tcf/ComprehensionEcrite.vue'
-import ComingSoon from './pages/tcf/ComingSoon.vue'
+import ComprehensionOrale from './pages/tcf/ComprehensionOrale.vue'
 import GrammarCorrector from './pages/GrammarCorrector.vue'
 
 const { route } = useRouter()
@@ -66,20 +66,7 @@ const currentPage = computed(() => {
   if (segs[0] === 'tcf') {
     if (segs.length === 1) return { component: TcfPage }
     if (segs[1] === 'ee') return { component: ExpressionEcrite }
-    if (segs[1] === 'co') return {
-      component: ComingSoon,
-      props: {
-        icon: '🎧',
-        title: 'Compréhension orale (CO)',
-        subtitle: "39 questions QCM, ~25 minutes. Extraits audio courts à plus longs.",
-        features: [
-          'Lecteur audio avec contrôle de la lecture',
-          'Banque de questions au format TCF',
-          'Score immédiat et explications',
-          'Minuteur identique à l\'examen'
-        ]
-      }
-    }
+    if (segs[1] === 'co') return { component: ComprehensionOrale }
     if (segs[1] === 'ce') return { component: ComprehensionEcrite }
     if (segs[1] === 'eo') return { component: ExpressionOrale }
     return { component: TcfPage }

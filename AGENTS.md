@@ -1,0 +1,12 @@
+# Interface design guidance
+
+- Reuse the nearest existing sibling component before inventing a new pattern. TCF references live in `src/pages/tcf/`; the TCF landing-page cards are in `src/pages/TcfPage.vue`.
+- Global light/dark theme tokens live in `src/style.css`. Use `--surface`, `--surface-alt`, `--input-bg`, `--border`, `--text-primary`, `--text-secondary`, `--text-muted`, `--text-faint`, `--title-color`, and shadow tokens rather than fixed neutral colors. Current convention is scoped component styles.
+- TCF pages use a compact top bar with mode/task tabs and an adjacent timer or total panel, followed by cards for prompts, questions, recording/editing, and results. Keep state navigation valid; disabled tabs must not imply unavailable transitions are possible.
+- Use roughly 14px page gaps. Standard surfaces have a 1.5px border, 14px radius, `var(--surface)` background, and 14–16px padding. Metadata is displayed in compact rounded pills on `var(--surface-alt)`.
+- Body and control text is generally 12–14px. Use clear hierarchy: 15–16px card titles, muted supporting copy, and small uppercase semibold/700 labels for task, question, or section metadata.
+- Match the accent palette of the sibling experience being followed; do not introduce a new palette merely to distinguish a skill. CO follows EE's purple `#8e44ad` palette. Existing CE and EO screens retain teal `#16a085` and orange `#e67e22` respectively. Apply accents to active tabs, focus, selected controls, and small emphasis—not large decorative backgrounds.
+- Buttons use explicit component classes, about an 8px radius, 13px medium/semibold text, and primary, secondary, ghost, and danger variants. Do not broadly style all descendant `button` elements. Keep controls at least 44px on touch-oriented layouts where practical.
+- Status colors are green `#27ae60` for success/running, orange `#e67e22` for warning/paused, red `#c0392b` for error/overtime, and muted gray for skipped/unknown. Pair every status color with visible text. Use translucent 8-digit hex backgrounds so states remain dark-mode safe.
+- Inputs and answer options need visible labels, keyboard focus rings, and selected/result states that combine border, background, and text. Preserve native semantics (`fieldset`, radio inputs, buttons, labels, live regions) and meaningful accessible names.
+- Layouts must remain usable at 360px: wrap top bars/actions, allow full-width controls, avoid fixed wide columns, and keep media at `max-width: 100%`. Prefer responsive grids/flex wrapping over hiding essential information.

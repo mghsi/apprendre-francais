@@ -46,12 +46,12 @@ const skills = [
     tag: 'CO',
     title: 'Compréhension orale',
     description: "Questions à choix multiples sur des extraits audio courts à plus longs.",
-    duration: '25 min',
+    duration: '35 min',
     format: '39 questions QCM',
     icon: '🎧',
     color: '#3498db',
     path: '/tcf/co',
-    disabled: true
+    disabled: false
   },
   {
     id: 'ce',
