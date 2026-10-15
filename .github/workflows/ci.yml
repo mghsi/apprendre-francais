@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: apprendre_francais
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d apprendre_francais"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/apprendre_francais
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/apprendre_francais
+      CORS_ORIGINS: http://localhost:5173
+      AUTH0_ISSUER: https://ci.invalid.auth0.com/
+      AUTH0_AUDIENCE: https://api.ci.invalid/
+      LLM_PROVIDER: mock
+      LLM_MODEL: mock-local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/api/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install backend dependencies
+        run: npm ci --prefix apps/api
+      - name: Audit dependencies
+        run: npm audit --audit-level=high && npm audit --prefix apps/api --audit-level=high
+      - name: Migrate test database
+        run: npm --prefix apps/api run migrate
+      - name: Test and typecheck backend
+        run: npm --prefix apps/api run typecheck && npm --prefix apps/api test
+      - name: Build production artifacts
+        run: npm run build && npm --prefix apps/api run build

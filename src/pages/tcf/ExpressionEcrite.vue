@@ -1,5 +1,17 @@
 <template>
   <div class="writing-practice">
+    <nav class="mode-tabs" aria-label="Mode d'entraînement">
+      <button v-for="item in modes" :key="item.id" class="mode-tab" :class="{ active: mode === item.id }" :disabled="hasRunningTimer" @click="changeMode(item.id)">
+        {{ item.label }}
+      </button>
+    </nav>
+
+    <ProductionHistory v-if="mode === 'history'" :attempts="attempts" @delete="removeAttempt" />
+    <template v-else>
+    <p class="mode-notice" :class="mode">
+      <strong>{{ currentMode.label }} :</strong> {{ currentMode.description }}
+    </p>
+
     <!-- Barre supérieure : sélection de tâche + total -->
     <div class="top-bar">
       <div class="task-tabs">
@@ -7,12 +19,13 @@
           v-for="t in tcfTasks"
           :key="t.id"
           class="task-tab"
-          :class="{ active: currentTaskId === t.id, running: timers[t.id].running }"
+          :class="{ active: currentTaskId === t.id, running: timerForTask(t.id).running }"
+          :disabled="hasRunningTimer && currentTaskId !== t.id"
           @click="currentTaskId = t.id"
         >
           <span class="task-tab-name">{{ t.name }}</span>
           <span class="task-tab-meta">
-            <span class="task-tab-time">{{ formatTime(timers[t.id].elapsed) }}</span>
+            <span class="task-tab-time">{{ formatTime(timerForTask(t.id).elapsed) }}</span>
             <span class="task-tab-words">{{ wordCounts[t.id] }} mots</span>
           </span>
         </button>
@@ -61,7 +74,7 @@
             {{ currentTask.minWords }}–{{ currentTask.maxWords }} mots
           </span>
         </div>
-        <select class="prompt-select" v-model="currentPromptIdx">
+        <select class="prompt-select" v-model="currentPromptIdx" :disabled="currentTimer.running">
           <option :value="-1">— Aucun (j'utilise mon propre sujet) —</option>
           <option v-for="(p, i) in currentTask.prompts" :key="i" :value="i">
             Sujet d'entraînement {{ i + 1 }} — {{ p.title }}
@@ -91,6 +104,18 @@
       </div>
     </div>
 
+    <section v-if="mode !== 'exam' && currentPrompt" class="coach-card">
+      <div class="coach-head">
+        <div><strong>Coach de préparation</strong><p>Révélez un point à la fois. Chaque ouverture sera enregistrée comme assistance.</p></div>
+        <span>{{ revealedHints.length }}/{{ currentPrompt.expectedCoverage.length }}</span>
+      </div>
+      <div class="hint-actions">
+        <button class="btn-secondary" :disabled="revealedHints.length >= currentPrompt.expectedCoverage.length" @click="revealHint">Révéler un point</button>
+        <button v-if="mode === 'learn'" class="btn-secondary" @click="revealAllHints">Tout afficher</button>
+      </div>
+      <ul v-if="revealedHints.length" class="hint-list"><li v-for="hint in revealedHints" :key="hint">{{ coverageLabel(hint) }}</li></ul>
+    </section>
+
     <!-- Clavier virtuel d'accents -->
     <div class="accent-bar" role="toolbar" aria-label="Caractères accentués">
       <button
@@ -108,7 +133,7 @@
     <textarea
       ref="editorRef"
       class="editor"
-      v-model="answers[currentTaskId]"
+      v-model="currentAnswer"
       spellcheck="false"
       autocorrect="off"
       autocapitalize="off"
@@ -135,8 +160,22 @@
         <button class="btn-secondary" @click="copyToClipboard" title="Copier la réponse">
           📋 Copier
         </button>
+        <button class="submit-btn" :disabled="!currentAnswer.trim()" @click="selfCheckOpen = true">Soumettre la tentative</button>
       </div>
     </div>
+
+    <section v-if="selfCheckOpen" class="self-check-card">
+      <header><h3>Auto-vérification avant le retour automatisé</h3><p>Cette réflexion est conservée avec la tentative.</p></header>
+      <label v-for="item in selfCheckItems" :key="item.id" class="check-row">
+        <input v-model="selfAssessment[item.id]" type="checkbox" />
+        <span>{{ item.label }}</span>
+      </label>
+      <div class="self-check-actions">
+        <button class="btn-secondary" @click="selfCheckOpen = false">Continuer à écrire</button>
+        <button class="submit-btn" :disabled="submitting" @click="submitAttempt">{{ submitting ? 'Enregistrement…' : 'Confirmer et enregistrer' }}</button>
+      </div>
+    </section>
+    <p v-if="submitMessage" class="submit-message" aria-live="polite">{{ submitMessage }}</p>
 
     <!-- Correcteur grammatical Claude (mêmes corrections que la page /correcteur) -->
     <section class="corrector-section">
@@ -150,11 +189,14 @@
         </p>
       </header>
       <GrammarCorrectionPanel
-        :key="`gc-${currentTaskId}`"
-        v-model:text="answers[currentTaskId]"
-        analyse-label="✨ Corriger ma réponse avec Claude"
+        :key="`gc-${draftKey}`"
+        v-model:text="currentAnswer"
+        :context="evaluationContext"
+        analyse-label="✨ Évaluer ma réponse avec Claude"
+        @evaluated="storeEvaluation"
       />
     </section>
+    </template>
   </div>
 </template>
 
@@ -162,8 +204,23 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, reactive } from 'vue'
 import { tcfTasks, accentKeys } from '../../data/writingPrompts.js'
 import GrammarCorrectionPanel from '../../components/GrammarCorrectionPanel.vue'
+import ProductionHistory from '../../components/ProductionHistory.vue'
+import { createAttemptId, deleteProductionAttempt, listProductionAttempts, saveProductionAttempt, saveProductionEvaluation } from '../../utils/productionStore.js'
 
 const STORAGE_KEY = 'tcf-writing-drafts-v2'
+const modes = [
+  { id: 'learn', label: 'Apprendre', description: 'conseils et points de couverture disponibles sans comparaison avec les conditions d’examen.' },
+  { id: 'guided', label: 'Guidé', description: 'minuteur actif et indices progressifs, enregistrés dans la tentative.' },
+  { id: 'exam', label: 'Examen', description: 'aucun indice pendant la production; contraintes et minuterie seulement.' },
+  { id: 'history', label: 'Historique', description: '' }
+]
+const mode = ref('guided')
+const currentMode = computed(() => modes.find(item => item.id === mode.value) || modes[1])
+const attempts = ref([])
+const submitting = ref(false)
+const submitMessage = ref('')
+const selfCheckOpen = ref(false)
+const hintCounts = ref({})
 
 // Budget conseillé par tâche (TCF = 60 min au total)
 const TASK_BUDGETS = { 1: 15 * 60, 2: 20 * 60, 3: 25 * 60 }
@@ -176,15 +233,11 @@ const currentTaskId = ref(1)
 const currentPromptIndices = ref({ 1: 0, 2: 0, 3: 0 })
 
 // Une réponse + un sujet collé par tâche
-const answers = ref({ 1: '', 2: '', 3: '' })
+const answers = ref({})
 const pastedSujets = ref({ 1: '', 2: '', 3: '' })
 
 // Minuteurs indépendants par tâche (compte croissant, pause manuelle)
-const timers = reactive({
-  1: { elapsed: 0, running: false },
-  2: { elapsed: 0, running: false },
-  3: { elapsed: 0, running: false }
-})
+const timers = reactive({})
 
 const currentTask = computed(
   () => tcfTasks.find(t => t.id === currentTaskId.value)
@@ -198,17 +251,45 @@ const currentPrompt = computed(() => {
   if (i < 0) return null
   return currentTask.value.prompts[i] || null
 })
-const currentTimer = computed(() => timers[currentTaskId.value])
+const draftKey = computed(() => currentPrompt.value?.id || `ee-t${currentTaskId.value}-custom`)
+const currentAnswer = computed({
+  get: () => answers.value[draftKey.value] || '',
+  set: value => { answers.value[draftKey.value] = value }
+})
+const revealedHints = computed(() => currentPrompt.value?.expectedCoverage.slice(0, hintCounts.value[draftKey.value] || 0) || [])
+const assistanceUsed = computed(() => revealedHints.value.map(hint => `indice:${hint}`))
+const evaluationContext = computed(() => ({
+  skill: 'ee', task: currentTaskId.value, promptId: currentPrompt.value?.id || draftKey.value,
+  promptVersion: currentPrompt.value?.version || 1,
+  instruction: currentPrompt.value?.text || pastedSujets.value[currentTaskId.value],
+  expectedCoverage: currentPrompt.value?.expectedCoverage || [], mode: mode.value,
+  assistanceUsed: assistanceUsed.value
+}))
+function draftKeyForTask(taskId) {
+  const task = tcfTasks.find(item => item.id === taskId)
+  const index = currentPromptIndices.value[taskId] ?? 0
+  return task?.prompts[index]?.id || `ee-t${taskId}-custom`
+}
+function timerForTask(taskId) {
+  const key = draftKeyForTask(taskId)
+  if (!timers[key]) timers[key] = { elapsed: 0, running: false }
+  return timers[key]
+}
+const currentTimer = computed(() => timerForTask(currentTaskId.value))
+const hasRunningTimer = computed(() => Object.values(timers).some(timer => timer.running))
 
 const totalElapsed = computed(
-  () => timers[1].elapsed + timers[2].elapsed + timers[3].elapsed
+  () => [1, 2, 3].reduce((sum, id) => sum + timerForTask(id).elapsed, 0)
 )
 
 // --- Compteurs de mots (par tâche) ---
 const wordCounts = computed(() => {
   const out = {}
   for (const id of [1, 2, 3]) {
-    const txt = (answers.value[id] || '').trim()
+    const task = tcfTasks.find(item => item.id === id)
+    const promptIndex = currentPromptIndices.value[id] ?? 0
+    const key = task?.prompts[promptIndex]?.id || `ee-t${id}-custom`
+    const txt = (answers.value[key] || '').trim()
     out[id] = txt ? txt.split(/\s+/).filter(Boolean).length : 0
   }
   return out
@@ -244,7 +325,7 @@ function insertChar(ch) {
   const before = ta.value.slice(0, start)
   const after = ta.value.slice(end)
   const next = before + ch + after
-  answers.value[currentTaskId.value] = next
+  currentAnswer.value = next
   nextTick(() => {
     ta.focus()
     const pos = start + ch.length
@@ -255,12 +336,12 @@ function insertChar(ch) {
 // --- Actions ---
 function clearCurrent() {
   if (!confirm('Effacer le texte de la tâche en cours ?')) return
-  answers.value[currentTaskId.value] = ''
+  currentAnswer.value = ''
 }
 
 async function copyToClipboard() {
   try {
-    await navigator.clipboard.writeText(answers.value[currentTaskId.value] || '')
+    await navigator.clipboard.writeText(currentAnswer.value)
   } catch (e) {
     // ignore
   }
@@ -272,18 +353,32 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return
     const data = JSON.parse(raw)
-    if (data.answers) answers.value = { 1: '', 2: '', 3: '', ...data.answers }
+    if (data.answers) {
+      const migrated = { ...data.answers }
+      for (const id of [1, 2, 3]) {
+        if (typeof data.answers[id] === 'string' && data.answers[id]) {
+          migrated[`ee-t${id}-custom`] = data.answers[id]
+          currentPromptIndices.value[id] = -1
+          if (data.currentPromptIndices) data.currentPromptIndices[id] = -1
+          delete migrated[id]
+        }
+      }
+      answers.value = migrated
+    }
     if (data.pastedSujets) pastedSujets.value = { 1: '', 2: '', 3: '', ...data.pastedSujets }
     if (data.currentPromptIndices) {
       currentPromptIndices.value = { 1: 0, 2: 0, 3: 0, ...data.currentPromptIndices }
     }
     if (typeof data.currentTaskId === 'number') currentTaskId.value = data.currentTaskId
-    if (data.timers) {
+    if (['learn', 'guided', 'exam'].includes(data.mode)) mode.value = data.mode
+    if (data.hintCounts) hintCounts.value = data.hintCounts
+    if (data.timersByDraft) {
+      for (const [key, timer] of Object.entries(data.timersByDraft)) timers[key] = { elapsed: timer.elapsed || 0, running: false }
+    } else if (data.timers) {
       for (const id of [1, 2, 3]) {
         if (data.timers[id]) {
-          timers[id].elapsed = data.timers[id].elapsed || 0
-          // On ne reprend jamais en cours après un rechargement
-          timers[id].running = false
+          timerForTask(id).elapsed = data.timers[id].elapsed || 0
+          timerForTask(id).running = false
         }
       }
     }
@@ -301,11 +396,9 @@ function saveState() {
         pastedSujets: pastedSujets.value,
         currentPromptIndices: currentPromptIndices.value,
         currentTaskId: currentTaskId.value,
-        timers: {
-          1: { elapsed: timers[1].elapsed },
-          2: { elapsed: timers[2].elapsed },
-          3: { elapsed: timers[3].elapsed }
-        }
+        mode: mode.value,
+        hintCounts: hintCounts.value,
+        timersByDraft: Object.fromEntries(Object.entries(timers).map(([key, timer]) => [key, { elapsed: timer.elapsed }]))
       })
     )
   } catch (e) {
@@ -314,7 +407,7 @@ function saveState() {
 }
 
 watch(
-  [answers, pastedSujets, currentTaskId, currentPromptIndices],
+  [answers, pastedSujets, currentTaskId, currentPromptIndices, mode, hintCounts],
   saveState,
   { deep: true }
 )
@@ -326,11 +419,11 @@ function ensureInterval() {
   intervalId = setInterval(() => {
     let anyRunning = false
     let dirty = false
-    for (const id of [1, 2, 3]) {
-      if (timers[id].running) {
-        timers[id].elapsed += 1
+    for (const timer of Object.values(timers)) {
+      if (timer.running) {
+        timer.elapsed += 1
         anyRunning = true
-        if (timers[id].elapsed % 5 === 0) dirty = true
+        if (timer.elapsed % 5 === 0) dirty = true
       }
     }
     if (dirty) saveState()
@@ -342,15 +435,17 @@ function ensureInterval() {
 }
 
 function toggleTimer(taskId) {
-  timers[taskId].running = !timers[taskId].running
-  if (timers[taskId].running) ensureInterval()
+  const timer = timerForTask(taskId)
+  timer.running = !timer.running
+  if (timer.running) ensureInterval()
   saveState()
 }
 
 function resetTimer(taskId) {
   if (!confirm(`Réinitialiser le minuteur de la Tâche ${taskId} ?`)) return
-  timers[taskId].running = false
-  timers[taskId].elapsed = 0
+  const timer = timerForTask(taskId)
+  timer.running = false
+  timer.elapsed = 0
   saveState()
 }
 
@@ -360,7 +455,82 @@ function formatTime(s) {
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 }
 
-onMounted(loadState)
+function revealHint() {
+  const maximum = currentPrompt.value?.expectedCoverage.length || 0
+  hintCounts.value[draftKey.value] = Math.min(maximum, (hintCounts.value[draftKey.value] || 0) + 1)
+}
+function revealAllHints() {
+  hintCounts.value[draftKey.value] = currentPrompt.value?.expectedCoverage.length || 0
+}
+function coverageLabel(value) {
+  return value.replaceAll('-', ' ')
+}
+function changeMode(nextMode) {
+  if (nextMode === 'exam' && assistanceUsed.value.length && !confirm('Passer en mode Examen effacera les indices de ce brouillon. Continuer ?')) return
+  if (nextMode === 'exam') hintCounts.value[draftKey.value] = 0
+  mode.value = nextMode
+}
+
+const baseSelfCheckItems = [
+  { id: 'allPoints', label: 'J’ai répondu à tous les points demandés.' },
+  { id: 'register', label: 'Le destinataire et le registre sont appropriés.' },
+  { id: 'wordRange', label: 'Ma réponse respecte la fourchette de mots.' },
+  { id: 'mainMessage', label: 'Mon message ou ma position principale est clair.' },
+  { id: 'example', label: 'J’ai ajouté un détail ou un exemple concret.' }
+]
+const selfCheckItems = computed(() => currentTaskId.value === 3
+  ? [...baseSelfCheckItems, { id: 'comparison', label: 'J’ai comparé les deux points de vue et séparé mon opinion.' }]
+  : baseSelfCheckItems)
+const selfAssessment = reactive({ allPoints: false, register: false, wordRange: false, mainMessage: false, example: false, comparison: false })
+watch(draftKey, () => {
+  selfCheckOpen.value = false
+  submitMessage.value = ''
+  for (const key of Object.keys(selfAssessment)) selfAssessment[key] = false
+})
+
+async function submitAttempt() {
+  if (!currentAnswer.value.trim()) return
+  submitting.value = true
+  submitMessage.value = ''
+  try {
+    const now = Date.now()
+    const attempt = {
+      id: createAttemptId('ee'), skill: 'ee', task: currentTaskId.value,
+      promptId: currentPrompt.value?.id || draftKey.value,
+      promptTitle: currentPrompt.value?.title || 'Sujet personnel',
+      promptVersion: currentPrompt.value?.version || 1, mode: mode.value,
+      assistanceUsed: [...assistanceUsed.value], startedAt: now - currentTimer.value.elapsed * 1000,
+      submittedAt: now, activeSeconds: currentTimer.value.elapsed,
+      responseText: currentAnswer.value, wordCount: wordCounts.value[currentTaskId.value],
+      selfAssessment: Object.fromEntries(selfCheckItems.value.map(item => [item.id, !!selfAssessment[item.id]])),
+      evaluation: null, revisionOfAttemptId: null,
+      contentTags: [...(currentPrompt.value?.themes || [])]
+    }
+    await saveProductionAttempt(attempt)
+    attempts.value.unshift(attempt)
+    submitMessage.value = 'Tentative enregistrée. Vous pouvez maintenant demander l’évaluation sans risque de perdre votre texte.'
+    selfCheckOpen.value = false
+  } catch (error) {
+    submitMessage.value = `Impossible d’enregistrer : ${error.message}`
+  } finally { submitting.value = false }
+}
+
+async function removeAttempt(attempt) {
+  if (!confirm('Supprimer définitivement cette tentative ?')) return
+  await deleteProductionAttempt(attempt)
+  attempts.value = attempts.value.filter(item => item.id !== attempt.id)
+}
+async function storeEvaluation(evaluation) {
+  const attempt = attempts.value.find(item => item.promptId === evaluationContext.value.promptId && item.responseText === evaluation.original)
+  if (!attempt) return
+  await saveProductionEvaluation(attempt.id, evaluation)
+  attempt.evaluation = evaluation
+}
+
+onMounted(async () => {
+  loadState()
+  try { attempts.value = await listProductionAttempts('ee') } catch { /* local storage may be unavailable */ }
+})
 onBeforeUnmount(() => {
   if (intervalId) {
     clearInterval(intervalId)
@@ -376,6 +546,24 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 14px;
 }
+.mode-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-alt); }
+.mode-tab { min-height: 40px; padding: 7px 13px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 600; }
+.mode-tab.active { border-color: #8e44ad; background: var(--surface); color: #8e44ad; }
+.mode-notice { padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-muted); font-size: 12.5px; }
+.mode-notice.exam { border-color: #8e44ad66; }
+.coach-card, .self-check-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface); }
+.coach-head { display: flex; justify-content: space-between; gap: 10px; }
+.coach-head strong, .self-check-card h3 { color: var(--title-color); font-size: 15px; }
+.coach-head p, .self-check-card header p { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
+.coach-head > span { align-self: start; padding: 3px 8px; border-radius: 999px; background: var(--surface-alt); color: var(--text-muted); font-size: 11px; }
+.hint-actions, .self-check-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.hint-list { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; }
+.hint-list li { padding: 5px 9px; border-radius: 999px; background: #8e44ad14; color: #8e44ad; font-size: 12px; }
+.check-row { display: flex; gap: 9px; align-items: start; color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
+.check-row input { margin-top: 2px; width: 17px; height: 17px; accent-color: #8e44ad; }
+.submit-btn { min-height: 40px; padding: 8px 13px; border: 1.5px solid #8e44ad; border-radius: 9px; background: #8e44ad; color: white; font-size: 13px; font-weight: 600; }
+.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.submit-message { padding: 9px 12px; border-radius: 9px; background: #27ae6014; color: #218c50; font-size: 12.5px; }
 
 /* Barre supérieure */
 .top-bar {

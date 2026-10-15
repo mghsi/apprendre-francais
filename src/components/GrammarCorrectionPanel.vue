@@ -29,6 +29,29 @@
       rafraîchir les corrections.
     </div>
 
+    <section v-if="result?.taskFulfillment" class="task-results" aria-live="polite">
+      <div class="task-results-head">
+        <div>
+          <span class="task-status" :class="result.taskFulfillment.status">{{ fulfillmentLabel }}</span>
+          <h3>Réussite de la tâche</h3>
+        </div>
+        <small>{{ result.disclaimer }}</small>
+      </div>
+      <ul v-if="result.taskFulfillment.evidence.length" class="feedback-list strengths-list">
+        <li v-for="item in result.taskFulfillment.evidence" :key="item">{{ item }}</li>
+      </ul>
+      <div v-if="result.taskFulfillment.missingRequirements.length" class="missing-block">
+        <strong>Exigences à compléter</strong>
+        <ul class="feedback-list"><li v-for="item in result.taskFulfillment.missingRequirements" :key="item">{{ item }}</li></ul>
+      </div>
+      <div v-if="result.strengths.length || result.priorities.length" class="feedback-columns">
+        <div v-if="result.strengths.length"><strong>Points forts</strong><ul class="feedback-list"><li v-for="item in result.strengths" :key="item">{{ item }}</li></ul></div>
+        <div v-if="result.priorities.length"><strong>Priorités (maximum 3)</strong><ul class="feedback-list priority-list"><li v-for="item in result.priorities" :key="item">{{ item }}</li></ul></div>
+      </div>
+      <details v-if="result.dimensions.length" class="dimension-details"><summary>Voir le profil d’entraînement</summary><ul class="feedback-list"><li v-for="item in result.dimensions" :key="item.id"><strong>{{ item.id }}</strong> — {{ item.level }}<template v-if="item.nextAction"> : {{ item.nextAction }}</template></li></ul></details>
+      <p v-if="result.retryChallenge" class="retry-challenge"><strong>Prochain essai :</strong> {{ result.retryChallenge }}</p>
+    </section>
+
     <!-- Résultats -->
     <section v-if="result" class="results">
       <div class="results-head">
@@ -209,13 +232,15 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { runAiOperation } from '../services/api.js'
 import { applyFrenchElision } from '../utils/frenchElide.js'
 
 const props = defineProps({
   text: { type: String, required: true },
   analyseLabel: { type: String, default: '✨ Analyser avec Claude' },
+  context: { type: Object, default: null },
 })
-const emit = defineEmits(['update:text'])
+const emit = defineEmits(['update:text', 'evaluated'])
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -234,6 +259,9 @@ const suggestionApplied = ref([])
 const stale = computed(
   () => !!result.value && props.text !== currentText.value
 )
+const fulfillmentLabel = computed(() => ({
+  strong: 'Solide', partial: 'Partielle', weak: 'À reprendre'
+})[result.value?.taskFulfillment?.status] || '')
 
 // Si le parent modifie le texte en dehors d'une correction (édition
 // manuelle), on resynchronise currentText pour que les substitutions
@@ -345,19 +373,15 @@ async function runCorrection() {
   result.value = null
   loading.value = true
   try {
-    const res = await fetch('/api/correct', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: props.text }),
-    })
-    const payload = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(payload?.error || `Échec HTTP ${res.status}`)
-    }
+    const body = props.context
+      ? { ...props.context, responseText: props.text }
+      : { text: props.text }
+    const payload = await runAiOperation(props.context ? 'evaluation' : 'correction', body)
     result.value = payload
     currentText.value = payload.original
     errorFixed.value = payload.errors.map(() => false)
     suggestionApplied.value = payload.suggestions.map(() => false)
+    emit('evaluated', payload)
   } catch (err) {
     errorMessage.value = err?.message || 'Erreur inconnue'
   } finally {
@@ -503,6 +527,22 @@ defineExpose({ clearAnalysis })
   color: #e67e22;
   font-size: 12.5px;
 }
+
+.task-results { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface); }
+.task-results-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: start; }
+.task-results-head > div { display: flex; align-items: center; gap: 8px; }
+.task-results h3 { font-size: 16px; color: var(--title-color); }
+.task-results small { color: var(--text-muted); }
+.task-status { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.task-status.strong { color: #27ae60; background: #27ae6018; }
+.task-status.partial { color: #e67e22; background: #e67e2218; }
+.task-status.weak { color: #c0392b; background: #c0392b18; }
+.feedback-list { margin: 4px 0 0 18px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.55; }
+.feedback-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.feedback-columns strong, .missing-block strong { font-size: 12px; color: var(--text-primary); }
+.missing-block { padding: 9px 10px; border-radius: 9px; background: #c0392b0d; border: 1px solid #c0392b44; }
+.retry-challenge { padding: 9px 10px; border-radius: 9px; background: var(--surface-alt); color: var(--text-secondary); font-size: 12.5px; }
+@media (max-width: 520px) { .feedback-columns { grid-template-columns: 1fr; } }
 
 .results {
   display: flex;

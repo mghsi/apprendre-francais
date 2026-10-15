@@ -117,7 +117,7 @@ const modules = [
 const tcfShortcuts = [
   { id: 'co', short: 'CO', full: 'Compréhension orale', icon: '🎧', color: '#3498db', path: '/tcf/co', disabled: false },
   { id: 'ce', short: 'CE', full: 'Compréhension écrite', icon: '📖', color: '#16a085', path: '/tcf/ce', disabled: true },
-  { id: 'eo', short: 'EO', full: 'Expression orale', icon: '🎤', color: '#e67e22', path: '/tcf/eo', disabled: true },
+  { id: 'eo', short: 'EO', full: 'Expression orale', icon: '🎤', color: '#e67e22', path: '/tcf/eo', disabled: false },
   { id: 'ee', short: 'EE', full: 'Expression écrite', icon: '✍️', color: '#8e44ad', path: '/tcf/ee', disabled: false }
 ]
 </script>

@@ -33,7 +33,11 @@ export function navigate(path) {
 }
 
 export function useRouter() {
-  onMounted(install)
+  onMounted(() => {
+    // Auth0 restores the hash before mounting, using replaceState (no hashchange).
+    onHashChange()
+    install()
+  })
   onBeforeUnmount(() => {
     // L'écouteur reste : il sert à toute l'application
   })

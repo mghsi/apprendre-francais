@@ -31,6 +31,36 @@
         </template>
       </nav>
 
+      <div class="auth-actions">
+        <span v-if="authState.error" class="auth-error" role="status">
+          {{ authState.error }}
+        </span>
+        <button
+          v-if="authState.authenticated"
+          class="auth-btn"
+          @click="navigate('/profil')"
+          :aria-current="route.path === '/profil' ? 'page' : undefined"
+        >
+          Mon profil
+        </button>
+        <button
+          v-if="authState.configured && authState.ready && !authState.authenticated"
+          class="auth-btn"
+          :disabled="authState.loading"
+          @click="login()"
+        >
+          Se connecter
+        </button>
+        <button
+          v-else-if="authState.configured && authState.authenticated"
+          class="auth-btn"
+          :disabled="authState.loading"
+          :title="authState.user?.email || authState.user?.name || 'Compte connecté'"
+          @click="logout"
+        >
+          Se déconnecter
+        </button>
+      </div>
       <button class="theme-toggle" @click="cycleTheme" :title="themeLabel">
         {{ themeIcon }}
       </button>
@@ -45,6 +75,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, navigate } from './composables/useRouter.js'
+import { authState, login, logout } from './services/auth.js'
 
 import HomePage from './pages/HomePage.vue'
 import ConjugationPage from './pages/ConjugationPage.vue'
@@ -54,6 +85,7 @@ import ExpressionOrale from './pages/tcf/ExpressionOrale.vue'
 import ComprehensionEcrite from './pages/tcf/ComprehensionEcrite.vue'
 import ComprehensionOrale from './pages/tcf/ComprehensionOrale.vue'
 import GrammarCorrector from './pages/GrammarCorrector.vue'
+import ProfilePage from './pages/ProfilePage.vue'
 
 const { route } = useRouter()
 
@@ -63,6 +95,7 @@ const currentPage = computed(() => {
   if (segs.length === 0) return { component: HomePage }
   if (segs[0] === 'conjugaison') return { component: ConjugationPage }
   if (segs[0] === 'correcteur') return { component: GrammarCorrector }
+  if (segs[0] === 'profil') return { component: ProfilePage }
   if (segs[0] === 'tcf') {
     if (segs.length === 1) return { component: TcfPage }
     if (segs[1] === 'ee') return { component: ExpressionEcrite }
@@ -85,6 +118,8 @@ const breadcrumbs = computed(() => {
     crumbs.push({ label: 'Conjugaison' })
   } else if (segs[0] === 'correcteur') {
     crumbs.push({ label: 'Correcteur' })
+  } else if (segs[0] === 'profil') {
+    crumbs.push({ label: 'Mon profil' })
   } else if (segs[0] === 'tcf') {
     if (segs.length === 1) {
       crumbs.push({ label: 'TCF' })
@@ -219,7 +254,6 @@ onMounted(() => applyTheme(theme.value))
 .crumb-sep { color: var(--text-faintest); }
 
 .theme-toggle {
-  margin-left: auto;
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: 10px;
@@ -232,6 +266,47 @@ onMounted(() => applyTheme(theme.value))
 .theme-toggle:hover {
   border-color: #2980b9;
   box-shadow: 0 2px 8px var(--shadow-sm);
+}
+
+.auth-btn {
+  min-height: 44px;
+  padding: 7px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.auth-btn:hover:not(:disabled) {
+  border-color: #2980b9;
+  color: #2980b9;
+}
+.auth-btn:focus-visible,
+.theme-toggle:focus-visible {
+  outline: 3px solid #2980b933;
+  outline-offset: 2px;
+}
+.auth-btn:disabled { opacity: 0.6; cursor: wait; }
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.auth-error {
+  max-width: 240px;
+  color: #c0392b;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .app-header { flex-wrap: wrap; }
+  .breadcrumbs { order: 3; flex-basis: 100%; }
+  .auth-actions { margin-left: auto; }
+  .auth-error { max-width: none; }
 }
 
 .app-main {

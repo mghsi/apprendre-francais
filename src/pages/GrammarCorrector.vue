@@ -3,7 +3,7 @@
     <header class="header">
       <h2 class="title">📝 Correcteur grammatical</h2>
       <p class="subtitle">
-        Saisis une phrase ou un court paragraphe en français. Claude
+        Saisis une phrase ou un court paragraphe en français. L’assistant
         identifiera chaque <span class="legend legend-error">erreur</span>
         et te proposera des
         <span class="legend legend-suggestion">recommandations B2+</span>
@@ -42,20 +42,19 @@
       v-model:text="inputText"
     />
 
-    <!-- Aide / configuration token -->
+    <!-- Aide -->
     <details class="help">
-      <summary>Comment configurer le token Claude ?</summary>
+      <summary>Comment l’analyse est-elle sécurisée ?</summary>
       <div class="help-body">
         <p>
-          Cette page utilise l'API Claude. Définis l'une de ces variables
-          d'environnement avant de lancer <code>npm run dev</code> :
+          Connecte-toi pour lancer une analyse. Le texte est envoyé uniquement
+          à l’API sécurisée de l’application, qui contrôle ton identité, les
+          limites d’utilisation et l’accès au fournisseur d’IA.
         </p>
-        <pre><code>CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # OAuth Claude Code (priorité)
-ANTHROPIC_API_KEY=sk-ant-api03-...        # ou clé API standard</code></pre>
         <p>
-          Astuce : <code>cp .env.example .env</code> puis remplis‑le. Le
-          token est lu côté serveur uniquement (par le middleware Vite) et
-          n'est jamais envoyé au navigateur.
+          Aucun token de fournisseur n’est stocké dans ton navigateur. Le
+          texte peut être traité par un fournisseur tiers conformément à la
+          politique de confidentialité de l’application.
         </p>
       </div>
     </details>

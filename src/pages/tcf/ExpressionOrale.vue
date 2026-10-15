@@ -1,5 +1,13 @@
 <template>
   <div class="eo-page">
+    <nav class="eo-mode-tabs" aria-label="Mode d'entraînement">
+      <button v-for="item in modes" :key="item.id" class="eo-mode-tab" :class="{ active: mode === item.id }" :disabled="['starting', 'recording', 'paused', 'stopping', 'prep'].includes(phase)" @click="changeMode(item.id)">{{ item.label }}</button>
+    </nav>
+
+    <ProductionHistory v-if="mode === 'history'" :attempts="attempts" @delete="removeAttempt" />
+    <template v-else>
+    <p class="eo-mode-notice" :class="mode"><strong>{{ currentMode.label }} :</strong> {{ currentMode.description }}</p>
+
     <!-- Onglets tâches -->
     <div class="eo-top-bar">
       <div class="eo-task-tabs">
@@ -8,6 +16,7 @@
           :key="t.id"
           class="eo-task-tab"
           :class="{ active: currentTaskId === t.id }"
+          :disabled="['starting', 'recording', 'paused', 'stopping', 'prep'].includes(phase)"
           @click="currentTaskId = t.id"
         >
           <span class="eo-tab-name">{{ t.name }}</span>
@@ -71,14 +80,14 @@
             >● Démarrer l'enregistrement</button>
 
             <button
-              v-if="phase === 'idle' && currentTask.prepSeconds > 0"
+              v-if="mode !== 'exam' && phase === 'idle' && currentTask.prepSeconds > 0"
               class="eo-timer-btn ghost"
               @click="startSpeaking"
               title="Passer directement à la parole sans préparation"
             >● Enregistrer sans prep</button>
 
             <button
-              v-if="phase === 'recording'"
+              v-if="phase === 'recording' && mode !== 'exam'"
               class="eo-timer-btn"
               @click="onPause"
             >⏸ Pause</button>
@@ -96,7 +105,7 @@
             >⏹ Arrêter</button>
 
             <button
-              v-if="phase !== 'idle'"
+              v-if="phase !== 'idle' && phase !== 'stopping'"
               class="eo-timer-btn ghost"
               @click="restartAll"
               title="Effacer l'enregistrement et recommencer cette tâche"
@@ -113,7 +122,7 @@
                 {{ currentTask.prepSeconds ? formatTime(currentTask.prepSeconds) + ' prep + ' : '' }}{{ formatTime(currentTask.speakSeconds) }} parole
               </span>
             </div>
-            <select class="eo-prompt-select" v-model="currentPromptIdx">
+            <select class="eo-prompt-select" v-model="currentPromptIdx" :disabled="['starting', 'recording', 'paused', 'stopping', 'prep'].includes(phase)">
               <option :value="-1">— Aucun (j'utilise mon propre sujet) —</option>
               <option v-for="(p, i) in currentTask.prompts" :key="i" :value="i">
                 Sujet {{ i + 1 }} — {{ p.title }}
@@ -140,9 +149,21 @@
           </div>
         </div>
 
+        <section v-if="mode !== 'exam' && currentPrompt" class="eo-coach-card">
+          <div class="eo-coach-head">
+            <div><strong>Coach progressif</strong><p>Révélez une catégorie ou un angle à la fois; l’assistance sera indiquée dans l’historique.</p></div>
+            <span>{{ revealedHints.length }}/{{ availableHints.length }}</span>
+          </div>
+          <div class="eo-hint-actions">
+            <button class="eo-timer-btn" :disabled="revealedHints.length >= availableHints.length" @click="revealHint">Révéler un indice</button>
+            <button v-if="mode === 'learn'" class="eo-timer-btn" @click="revealAllHints">Tout afficher</button>
+          </div>
+          <ul v-if="revealedHints.length" class="eo-hint-list"><li v-for="hint in revealedHints" :key="hint">{{ coverageLabel(hint) }}</li></ul>
+        </section>
+
         <!-- Structure / plan suggéré -->
         <StructurePanel
-          v-if="currentTask.structures && currentTask.structures.length"
+          v-if="mode !== 'exam' && currentTask.structures && currentTask.structures.length"
           :structures="currentTask.structures"
           :current-idx="currentStructureIdx"
           :elapsed-seconds="speakingElapsedSeconds"
@@ -153,13 +174,13 @@
           @enable="currentStructureEnabled = true"
         />
 
-        <!-- Champ notes (Tâche 3 uniquement, phase prep + speak) -->
+        <!-- Notes : préparation officielle T2 ou assistance clairement étiquetée T3 -->
         <div
-          v-if="currentTask.prepSeconds > 0 && (phase === 'prep' || phase === 'recording' || phase === 'paused')"
+          v-if="showPreparationNotes"
           class="eo-notes-card"
         >
           <label class="eo-notes-label" :for="`notes-${currentTaskId}`">
-            📝 Notes de préparation (éphémères — pour structurer vos arguments)
+            📝 {{ currentTaskId === 2 ? 'Notes de préparation officielle — mots-clés seulement' : 'Assistance d’entraînement — aucune préparation à l’épreuve' }}
           </label>
           <textarea
             :id="`notes-${currentTaskId}`"
@@ -173,7 +194,7 @@
 
         <!-- Vocab inline (Tâche 3, petit écran) -->
         <VocabPanel
-          v-if="currentTaskId === 3 && !showVocabSidebar"
+          v-if="mode !== 'exam' && currentTaskId === 3 && !showVocabSidebar"
           :task-id="3"
           :recording="phase === 'recording'"
           :auto-collapse="true"
@@ -217,7 +238,12 @@
             class="eo-audio"
             controls
             :src="recorder.audioUrl.value"
+            :aria-label="`Enregistrement de la tâche ${currentTaskId}`"
           ></audio>
+          <button v-if="phase === 'finished' && recorder.audioBlob.value" class="eo-submit-btn" :disabled="submitting" @click="submitAttempt">
+            {{ submitting ? 'Enregistrement…' : 'Enregistrer cette tentative' }}
+          </button>
+          <p v-if="submitMessage" class="eo-submit-message" aria-live="polite">{{ submitMessage }}</p>
         </div>
 
         <!-- Transcription + analyse -->
@@ -264,16 +290,18 @@
               </p>
             </header>
             <GrammarCorrectionPanel
-              :key="`eo-gc-${currentTaskId}`"
+              :key="`eo-gc-${draftKey}`"
               v-model:text="recorder.transcript.value"
-              analyse-label="✨ Analyser ma prise de parole avec Claude"
+              :context="evaluationContext"
+              analyse-label="✨ Évaluer ma prise de parole avec Claude"
+              @evaluated="storeEvaluation"
             />
           </div>
         </section>
       </div>
 
       <!-- Sidebar vocab (Tâche 3 grand écran) -->
-      <aside v-if="showVocabSidebar" class="eo-sidebar">
+      <aside v-if="mode !== 'exam' && showVocabSidebar" class="eo-sidebar">
         <VocabPanel
           :task-id="3"
           :sidebar="true"
@@ -282,6 +310,7 @@
         />
       </aside>
     </div>
+    </template>
   </div>
 </template>
 
@@ -293,13 +322,27 @@ import { saveAudio, loadAudio, deleteAudio } from '../../composables/useAudioSto
 import VocabPanel from '../../components/VocabPanel.vue'
 import StructurePanel from '../../components/StructurePanel.vue'
 import GrammarCorrectionPanel from '../../components/GrammarCorrectionPanel.vue'
+import ProductionHistory from '../../components/ProductionHistory.vue'
+import { createAttemptId, deleteProductionAttempt, listProductionAttempts, saveProductionAttempt, saveProductionEvaluation } from '../../utils/productionStore.js'
 
 const STATE_KEY = 'tcf-eo-state-v1'
+const modes = [
+  { id: 'learn', label: 'Apprendre', description: 'structures, catégories et vocabulaire disponibles; cette aide est enregistrée.' },
+  { id: 'guided', label: 'Guidé', description: 'indices progressifs sur demande; la Tâche 3 reste une assistance non officielle.' },
+  { id: 'exam', label: 'Examen', description: 'format officiel : 12 minutes, préparation uniquement pour la Tâche 2, aucun indice.' },
+  { id: 'history', label: 'Historique', description: '' }
+]
+const mode = ref('guided')
+const currentMode = computed(() => modes.find(item => item.id === mode.value) || modes[1])
+const attempts = ref([])
+const submitting = ref(false)
+const submitMessage = ref('')
+const hintCounts = ref({})
 
 const currentTaskId = ref(1)
 const currentPromptIndices = ref({ 1: 0, 2: 0, 3: 0 })
 const pastedSujets = ref({ 1: '', 2: '', 3: '' })
-const prepNotes = ref('')
+const prepNotesByDraft = ref({})
 
 // Structure pédagogique : index de la structure courante + activation, par tâche.
 // L'utilisateur peut tourner les structures pour s'habituer à chacune.
@@ -311,6 +354,9 @@ const recorder = useRecorder()
 
 // Phase machine per task: idle → prep? → recording ↔ paused → finished
 const phase = ref('idle')
+const recordingKey = ref('')
+const transcriptSnapshot = ref('')
+let loadGeneration = 0
 let phaseInterval = 0
 const phaseStartedAt = ref(0)
 const phaseEndsAt = ref(0)
@@ -328,6 +374,30 @@ const currentPrompt = computed(() => {
   if (i < 0) return null
   return currentTask.value.prompts[i] || null
 })
+const draftKey = computed(() => currentPrompt.value?.id || `eo-t${currentTaskId.value}-custom`)
+const prepNotes = computed({
+  get: () => prepNotesByDraft.value[draftKey.value] || '',
+  set: value => { prepNotesByDraft.value[draftKey.value] = value }
+})
+const availableHints = computed(() => currentPrompt.value?.hints?.categories || currentPrompt.value?.hints?.argumentCategories || currentPrompt.value?.expectedCoverage || [])
+const revealedHints = computed(() => availableHints.value.slice(0, hintCounts.value[draftKey.value] || 0))
+const assistanceUsed = computed(() => {
+  const used = revealedHints.value.map(hint => `indice:${hint}`)
+  if (mode.value !== 'exam' && currentStructureEnabled.value) used.push('structure')
+  if (mode.value !== 'exam' && currentTaskId.value === 3 && prepNotes.value.trim()) used.push('notes-t3-non-officielles')
+  return used
+})
+const showPreparationNotes = computed(() => {
+  if (currentTaskId.value === 2) return phase.value === 'prep' || phase.value === 'recording' || phase.value === 'paused'
+  return currentTaskId.value === 3 && mode.value !== 'exam'
+})
+const evaluationContext = computed(() => ({
+  skill: 'eo', task: currentTaskId.value, promptId: currentPrompt.value?.id || draftKey.value,
+  promptVersion: currentPrompt.value?.version || 1,
+  instruction: currentPrompt.value?.text || pastedSujets.value[currentTaskId.value],
+  expectedCoverage: currentPrompt.value?.expectedCoverage || [], mode: mode.value,
+  assistanceUsed: assistanceUsed.value
+}))
 
 const totalBudget = computed(() =>
   eoTasks.reduce((s, t) => s + t.prepSeconds + t.speakSeconds, 0)
@@ -387,6 +457,8 @@ function stopPhaseTick() {
 }
 
 const phaseLabel = computed(() => {
+  if (phase.value === 'starting') return '🎙 Activation du microphone…'
+  if (phase.value === 'stopping') return '⏳ Finalisation de l’enregistrement…'
   if (phase.value === 'prep') return '⏳ Préparation'
   if (phase.value === 'recording') return '🔴 Enregistrement en cours'
   if (phase.value === 'paused') return '⏸ Enregistrement en pause'
@@ -430,6 +502,8 @@ function skipPrep() {
 
 async function startSpeaking() {
   // If we were on prep, leave it
+  recordingKey.value = draftKey.value
+  phase.value = 'starting'
   await recorder.start()
   if (recorder.state.status !== 'recording') {
     // start() failed (e.g. mic denied) — fall back to idle so user can retry
@@ -460,14 +534,16 @@ function onResume() {
   recomputeRemaining()
 }
 
-function onStop() {
+async function onStop() {
   if (phase.value !== 'recording' && phase.value !== 'paused') return
-  recorder.stop()
+  phase.value = 'stopping'
+  await recorder.stop()
+  transcriptSnapshot.value = recorder.transcript.value
   phase.value = 'finished'
   stopPhaseTick()
 }
 
-function onTimerExpired() {
+async function onTimerExpired() {
   // Time's up — stop recording automatically. Stop the interval FIRST so
   // we don't re-enter this function while startSpeaking() awaits.
   if (phase.value === 'prep') {
@@ -478,14 +554,20 @@ function onTimerExpired() {
   }
   if (phase.value === 'recording') {
     stopPhaseTick()
-    recorder.stop()
+    phase.value = 'stopping'
+    await recorder.stop()
+    transcriptSnapshot.value = recorder.transcript.value
     phase.value = 'finished'
   }
 }
 
-function restartAll() {
+async function restartAll() {
+  if (phase.value === 'recording' || phase.value === 'paused') {
+    phase.value = 'stopping'
+    await recorder.stop()
+  }
   recorder.clear()
-  deleteAudio(currentTaskId.value).catch(() => {})
+  deleteAudio(draftKey.value).catch(() => {})
   phase.value = 'idle'
   phaseRemainingFrozen.value = 0
   stopPhaseTick()
@@ -508,6 +590,9 @@ function savePersistedState() {
         pastedSujets: pastedSujets.value,
         structureIndices: structureIndices.value,
         structureEnabled: structureEnabled.value,
+        mode: mode.value,
+        hintCounts: hintCounts.value,
+        prepNotesByDraft: prepNotesByDraft.value,
       })
     )
   } catch { /* quota */ }
@@ -522,11 +607,15 @@ function loadPersistedState() {
     if (obj.pastedSujets) pastedSujets.value = obj.pastedSujets
     if (obj.structureIndices) structureIndices.value = { ...structureIndices.value, ...obj.structureIndices }
     if (obj.structureEnabled) structureEnabled.value = { ...structureEnabled.value, ...obj.structureEnabled }
+    if (['learn', 'guided', 'exam'].includes(obj.mode)) mode.value = obj.mode
+    if (obj.hintCounts) hintCounts.value = obj.hintCounts
+    if (obj.prepNotesByDraft) prepNotesByDraft.value = obj.prepNotesByDraft
   } catch { /* ignore */ }
 }
 
 // Reload audio from IndexedDB whenever the active task changes
-async function reloadAudioForTask(taskId) {
+async function reloadAudioForDraft(key) {
+  const requestGeneration = ++loadGeneration
   // If we're currently recording, stop & clear (switching tasks aborts)
   if (phase.value === 'recording' || phase.value === 'paused') {
     recorder.stop()
@@ -536,11 +625,12 @@ async function reloadAudioForTask(taskId) {
   phaseRemainingFrozen.value = 0
   stopPhaseTick()
   recomputeRemaining()
-  prepNotes.value = ''
-
-  const entry = await loadAudio(taskId).catch(() => null)
+  const entry = await loadAudio(key).catch(() => null)
+  if (requestGeneration !== loadGeneration || key !== draftKey.value) return
   if (entry?.blob) {
-    recorder.loadFromBlob(entry.blob, entry.transcript || '')
+    recordingKey.value = key
+    recorder.loadFromBlob(entry.blob, entry.transcript || '', entry.durationMs || 0)
+    transcriptSnapshot.value = entry.transcript || ''
     phase.value = 'finished'
   }
 }
@@ -550,7 +640,8 @@ watch(
   () => recorder.audioBlob.value,
   (blob) => {
     if (blob) {
-      saveAudio(currentTaskId.value, blob, recorder.transcript.value).catch(() => {})
+      const key = recordingKey.value || draftKey.value
+      saveAudio(key, blob, recorder.transcript.value, recorder.state.durationMs).catch(() => {})
     }
   }
 )
@@ -559,23 +650,87 @@ watch(
   () => recorder.transcript.value,
   (txt) => {
     if (recorder.audioBlob.value) {
-      saveAudio(currentTaskId.value, recorder.audioBlob.value, txt).catch(() => {})
+      const key = recordingKey.value || draftKey.value
+      saveAudio(key, recorder.audioBlob.value, txt, recorder.state.durationMs).catch(() => {})
     }
   }
 )
 
-watch(currentTaskId, async (id) => {
+watch([currentTaskId, currentPromptIdx], async () => {
   savePersistedState()
-  await reloadAudioForTask(id)
+  await reloadAudioForDraft(draftKey.value)
 })
-watch([currentPromptIndices, pastedSujets, structureIndices, structureEnabled], savePersistedState, { deep: true })
+watch([currentPromptIndices, pastedSujets, structureIndices, structureEnabled, mode, hintCounts, prepNotesByDraft], savePersistedState, { deep: true })
+
+function revealHint() { hintCounts.value[draftKey.value] = Math.min(availableHints.value.length, (hintCounts.value[draftKey.value] || 0) + 1) }
+function revealAllHints() { hintCounts.value[draftKey.value] = availableHints.value.length }
+function coverageLabel(value) { return String(value).replaceAll('-', ' ') }
+function changeMode(nextMode) {
+  if (nextMode === 'exam' && assistanceUsed.value.length && !confirm('Passer en mode Examen effacera les indices et notes d’assistance de ce brouillon. Continuer ?')) return
+  if (nextMode === 'exam') {
+    hintCounts.value[draftKey.value] = 0
+    if (currentTaskId.value === 3) prepNotes.value = ''
+    currentStructureEnabled.value = false
+  }
+  mode.value = nextMode
+}
+
+async function submitAttempt() {
+  if (!recorder.audioBlob.value) return
+  submitting.value = true
+  submitMessage.value = ''
+  try {
+    const now = Date.now()
+    const activeSeconds = Math.round(recorder.state.durationMs / 1000)
+    const attempt = {
+      id: createAttemptId('eo'), skill: 'eo', task: currentTaskId.value,
+      promptId: currentPrompt.value?.id || draftKey.value,
+      promptTitle: currentPrompt.value?.title || 'Sujet personnel', promptVersion: currentPrompt.value?.version || 1,
+      mode: mode.value, assistanceUsed: [...assistanceUsed.value], startedAt: now - activeSeconds * 1000,
+      submittedAt: now, activeSeconds, responseText: '', wordCount: null,
+      audioRef: null, transcript: recorder.transcript.value, transcriptEdited: recorder.transcript.value !== transcriptSnapshot.value,
+      preparationNotes: prepNotes.value, selfAssessment: null, evaluation: null,
+      revisionOfAttemptId: null, contentTags: [...(currentPrompt.value?.themes || [])]
+    }
+    attempt.audioRef = attempt.id
+    await saveProductionAttempt(attempt, recorder.audioBlob.value)
+    attempts.value.unshift(attempt)
+    submitMessage.value = 'Tentative et audio enregistrés dans l’historique local.'
+  } catch (error) { submitMessage.value = `Impossible d’enregistrer : ${error.message}` }
+  finally { submitting.value = false }
+}
+
+async function removeAttempt(attempt) {
+  if (!confirm('Supprimer définitivement cette tentative et son audio ?')) return
+  await deleteProductionAttempt(attempt)
+  attempts.value = attempts.value.filter(item => item.id !== attempt.id)
+}
+async function migrateLegacyAudio() {
+  for (const task of eoTasks) {
+    const legacy = await loadAudio(task.id).catch(() => null)
+    if (!legacy?.blob) continue
+    const key = `eo-t${task.id}-custom`
+    const existing = await loadAudio(key).catch(() => null)
+    if (!existing) await saveAudio(key, legacy.blob, legacy.transcript || '', legacy.durationMs || 0)
+    await deleteAudio(task.id).catch(() => {})
+    currentPromptIndices.value[task.id] = -1
+  }
+}
+async function storeEvaluation(evaluation) {
+  const attempt = attempts.value.find(item => item.promptId === evaluationContext.value.promptId && item.transcript === evaluation.original)
+  if (!attempt) return
+  await saveProductionEvaluation(attempt.id, evaluation)
+  attempt.evaluation = evaluation
+}
 
 onMounted(async () => {
   loadPersistedState()
+  await migrateLegacyAudio()
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', onResize)
   }
-  await reloadAudioForTask(currentTaskId.value)
+  await reloadAudioForDraft(draftKey.value)
+  try { attempts.value = await listProductionAttempts('eo') } catch { /* storage unavailable */ }
   recomputeRemaining()
 })
 
@@ -593,6 +748,23 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 14px;
 }
+.eo-mode-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-alt); }
+.eo-mode-tab { min-height: 40px; padding: 7px 13px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 600; }
+.eo-mode-tab.active { border-color: #e67e22; background: var(--surface); color: #e67e22; }
+.eo-mode-tab:disabled { opacity: 0.5; cursor: not-allowed; }
+.eo-mode-notice { padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-muted); font-size: 12.5px; }
+.eo-mode-notice.exam { border-color: #e67e2266; }
+.eo-coach-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface); }
+.eo-coach-head { display: flex; justify-content: space-between; gap: 10px; }
+.eo-coach-head strong { color: var(--title-color); font-size: 15px; }
+.eo-coach-head p { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
+.eo-coach-head > span { align-self: start; padding: 3px 8px; border-radius: 999px; background: var(--surface-alt); color: var(--text-muted); font-size: 11px; }
+.eo-hint-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.eo-hint-list { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; }
+.eo-hint-list li { padding: 5px 9px; border-radius: 999px; background: #e67e2214; color: #e67e22; font-size: 12px; }
+.eo-submit-btn { align-self: flex-start; min-height: 40px; padding: 8px 13px; border: 1.5px solid #e67e22; border-radius: 9px; background: #e67e22; color: white; font-size: 13px; font-weight: 600; }
+.eo-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.eo-submit-message { padding: 9px 12px; border-radius: 9px; background: #27ae6014; color: #218c50; font-size: 12.5px; }
 
 /* Top bar */
 .eo-top-bar {

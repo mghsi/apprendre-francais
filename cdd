@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+compose() {
+  docker compose --project-name api --project-directory "$ROOT" -f "$ROOT/compose.yaml" "$@"
+}
+
+case "${1:-}" in
+  up)
+    for file in apps/api/.env .env.local; do
+      if [[ ! -f "$ROOT/$file" ]]; then
+        echo "Missing $file. See README.md for environment setup." >&2
+        exit 1
+      fi
+    done
+    # Build secrets do not invalidate Docker's cache when their contents change.
+    export FRONTEND_ENV_HASH="$(shasum -a 256 "$ROOT/.env.local" | cut -d ' ' -f 1)"
+    compose up --build --detach --wait --wait-timeout 120
+    echo "App running at http://localhost:5180"
+    ;;
+  down)
+    compose down
+    echo "Containers removed. Database data preserved."
+    ;;
+  destroy)
+    read -r -p "Delete all local database data? Type DELETE to confirm: " answer
+    [[ "$answer" == DELETE ]] || { echo "Cancelled."; exit 1; }
+    compose down --volumes
+    ;;
+  status) compose ps --all ;;
+  logs) compose logs --follow ;;
+  *)
+    echo "Usage: ./cdd {up|down|destroy|status|logs}" >&2
+    exit 1
+    ;;
+esac

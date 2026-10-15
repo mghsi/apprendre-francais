@@ -34,9 +34,9 @@ async function withStore(mode, fn) {
   })
 }
 
-export async function saveAudio(taskId, blob, transcript = '') {
+export async function saveAudio(taskId, blob, transcript = '', durationMs = 0) {
   return withStore('readwrite', (store) => {
-    store.put({ blob, transcript, savedAt: Date.now() }, String(taskId))
+    store.put({ blob, transcript, durationMs, savedAt: Date.now() }, String(taskId))
   })
 }
 

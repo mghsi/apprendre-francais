@@ -29,6 +29,11 @@
           <span class="meta-item">⏱ {{ s.duration }}</span>
           <span class="meta-item">{{ s.format }}</span>
         </div>
+        <div v-if="summaries[s.id]" class="tcf-practice-state">
+          <strong>{{ summaries[s.id].attempts }} tentative{{ summaries[s.id].attempts === 1 ? '' : 's' }}</strong>
+          <span v-if="summaries[s.id].latest">Dernière : {{ formatRecent(summaries[s.id].latest.submittedAt) }} · Tâche {{ summaries[s.id].latest.task }} ({{ modeLabel(summaries[s.id].latest.mode) }})</span>
+          <span>{{ summaries[s.id].recommendation }}</span>
+        </div>
         <div class="tcf-card-cta">
           {{ s.disabled ? 'Bientôt disponible' : 'Commencer →' }}
         </div>
@@ -38,7 +43,33 @@
 </template>
 
 <script setup>
+import { onMounted, reactive } from 'vue'
 import { navigate } from '../composables/useRouter.js'
+import { listProductionAttempts } from '../utils/productionStore.js'
+
+const summaries = reactive({})
+
+function modeLabel(mode) { return ({ learn: 'apprendre', guided: 'guidé', exam: 'examen' })[mode] || mode }
+function formatRecent(value) { return new Date(value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) }
+function recommendationFor(attempts) {
+  if (!attempts.length) return 'Conseil : commencez par le mode Apprendre.'
+  const practiced = new Set(attempts.map(item => item.task))
+  const missing = [1, 2, 3].find(task => !practiced.has(task))
+  if (missing) return `Conseil : essayez la Tâche ${missing}.`
+  const onlyAssisted = attempts.every(item => item.mode !== 'exam' || item.assistanceUsed?.length)
+  if (onlyAssisted) return 'Conseil : passez à une tentative sans assistance.'
+  if (attempts[0]?.evaluation?.priorities?.length) return `Conseil : ${attempts[0].evaluation.priorities[0]}`
+  return 'Conseil : évaluez votre dernière tentative pour choisir une priorité.'
+}
+
+onMounted(async () => {
+  for (const skill of ['ee', 'eo']) {
+    try {
+      const attempts = await listProductionAttempts(skill)
+      summaries[skill] = { attempts: attempts.length, latest: attempts[0] || null, recommendation: recommendationFor(attempts) }
+    } catch { /* IndexedDB unavailable */ }
+  }
+})
 
 const skills = [
   {
@@ -195,6 +226,8 @@ const skills = [
   font-size: 11px;
   color: var(--text-faint);
 }
+.tcf-practice-state { display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; border-radius: 9px; background: var(--surface-alt); color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
+.tcf-practice-state strong { color: var(--text-primary); }
 .meta-item {
   background: var(--surface-alt);
   padding: 3px 8px;

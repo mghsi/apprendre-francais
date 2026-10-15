@@ -5,11 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "npm --prefix apps/api run dev",
+    "dev:worker": "npm --prefix apps/api run dev:worker",
     "build": "node scripts/build-lefff.mjs && vite build",
+    "build:api": "npm --prefix apps/api run build",
     "build:lefff": "node scripts/build-lefff.mjs",
+    "test:api": "npm --prefix apps/api test",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@auth0/auth0-spa-js": "^2.24.1",
     "french-verbs-lefff": "^3.4.0",
     "mammoth": "^1.12.0",
     "vue": "^3.5.30"

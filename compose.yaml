@@ -1,0 +1,71 @@
+services:
+  postgres:
+    extends:
+      file: apps/api/compose.yaml
+      service: postgres
+    restart: unless-stopped
+
+  migrate:
+    build: apps/api
+    image: apprendre-francais-api:local
+    env_file: apps/api/.env
+    environment: &api-environment
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/apprendre_francais
+      CORS_ORIGINS: http://localhost:5180
+    command: ["node", "dist/db/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: apprendre-francais-api:local
+    env_file: apps/api/.env
+    environment: *api-environment
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    image: apprendre-francais-api:local
+    env_file: apps/api/.env
+    environment: *api-environment
+    command: ["node", "dist/worker.js"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+      args:
+        FRONTEND_ENV_HASH: ${FRONTEND_ENV_HASH:-}
+      secrets: [frontend-env]
+    ports:
+      - "127.0.0.1:5180:80"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  apprendre-francais-postgres:
+
+secrets:
+  frontend-env:
+    file: .env.local

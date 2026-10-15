@@ -11,6 +11,7 @@
 
 import { correctFrenchText } from './claudeCorrect.js'
 import { generateVocab } from './claudeVocab.js'
+import { evaluateProduction } from './claudeEvaluate.js'
 
 async function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -36,6 +37,19 @@ function sendJson(res, status, payload) {
 }
 
 function attach(server) {
+  server.middlewares.use('/api/evaluate', async (req, res, next) => {
+    if (req.method !== 'POST') return next()
+    try {
+      const body = await readJsonBody(req)
+      const result = await evaluateProduction(body)
+      sendJson(res, 200, result)
+    } catch (err) {
+      const msg = err?.message || 'Erreur inattendue'
+      console.error('[/api/evaluate]', msg)
+      sendJson(res, 500, { error: msg })
+    }
+  })
+
   server.middlewares.use('/api/correct', async (req, res, next) => {
     if (req.method !== 'POST') return next()
     try {

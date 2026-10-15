@@ -168,6 +168,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { runAiOperation } from '../services/api.js'
 
 const props = defineProps({
   taskId: { type: [String, Number], default: 3 },
@@ -260,15 +261,7 @@ async function generate() {
   loading.value = true
   error.value = ''
   try {
-    const res = await fetch('/api/eo/vocab', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ theme }),
-    })
-    const json = await res.json()
-    if (!res.ok) {
-      throw new Error(json?.error || `Erreur HTTP ${res.status}`)
-    }
+    const json = await runAiOperation('vocabulary', { theme })
     data.value = json
     map[theme] = json
     writeCacheMap(map)

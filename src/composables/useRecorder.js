@@ -36,7 +36,7 @@ export function useRecorder() {
   const state = reactive({
     supported: typeof window !== 'undefined' && !!navigator?.mediaDevices?.getUserMedia,
     speechSupported: !!hasSpeechRecognition,
-    status: 'idle', // 'idle' | 'recording' | 'paused' | 'stopped' | 'error'
+    status: 'idle', // 'idle' | 'recording' | 'paused' | 'stopping' | 'stopped' | 'error'
     error: '',
     durationMs: 0, // active recording time (excludes paused gaps)
     level: 0, // 0..1 RMS for the level meter
@@ -51,7 +51,8 @@ export function useRecorder() {
   // Internal refs (NOT reactive, so we don't proxy MediaRecorder etc.)
   let stream = null
   let recorder = null
-  let chunks = []
+  let generation = 0
+  let stopPromise = Promise.resolve(null)
   let recognition = null
   let audioCtx = null
   let analyser = null
@@ -202,7 +203,10 @@ export function useRecorder() {
     accumulated = 0
     state.durationMs = 0
     state.error = ''
-    chunks = []
+    const takeGeneration = ++generation
+    const takeChunks = []
+    let resolveTakeStop
+    stopPromise = new Promise(resolve => { resolveTakeStop = resolve })
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -217,20 +221,26 @@ export function useRecorder() {
       setError("Impossible de créer l'enregistreur : " + (e?.message || e))
       return
     }
+    const takeRecorder = recorder
+    const takeStream = stream
     recorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size > 0) chunks.push(ev.data)
+      if (ev.data && ev.data.size > 0) takeChunks.push(ev.data)
     }
     recorder.onstop = () => {
-      const type = recorder?.mimeType || mimeType || 'audio/webm'
-      const blob = new Blob(chunks, { type })
-      audioBlob.value = blob
-      clearAudioUrl()
-      audioUrl.value = URL.createObjectURL(blob)
+      const type = takeRecorder.mimeType || mimeType || 'audio/webm'
+      const blob = new Blob(takeChunks, { type })
+      if (takeGeneration === generation) {
+        audioBlob.value = blob
+        clearAudioUrl()
+        audioUrl.value = URL.createObjectURL(blob)
+        state.status = 'stopped'
+      }
       stopLevelMeter()
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop())
+      takeStream.getTracks().forEach((t) => t.stop())
+      if (stream === takeStream) {
         stream = null
       }
+      resolveTakeStop(takeGeneration === generation ? blob : null)
     }
     recorder.start(250)
     startLevelMeter(stream)
@@ -256,16 +266,19 @@ export function useRecorder() {
   }
 
   function stop() {
-    if (state.status !== 'recording' && state.status !== 'paused') return
+    if (state.status === 'stopping') return stopPromise
+    if (state.status !== 'recording' && state.status !== 'paused') return Promise.resolve(audioBlob.value)
     if (state.status === 'recording') {
       pauseTimer()
     }
     try { recorder?.stop() } catch { /* ignore */ }
     stopRecognition()
-    state.status = 'stopped'
+    state.status = 'stopping'
+    return stopPromise
   }
 
   function clear() {
+    generation += 1
     if (state.status === 'recording' || state.status === 'paused') {
       try { recorder?.stop() } catch { /* ignore */ }
     }
@@ -283,18 +296,17 @@ export function useRecorder() {
     state.durationMs = 0
     state.error = ''
     state.status = 'idle'
-    chunks = []
   }
 
   // Allow caller to seed a previously persisted recording (from IndexedDB)
-  function loadFromBlob(blob, savedTranscript = '') {
+  function loadFromBlob(blob, savedTranscript = '', durationMs = 0) {
     clearAudioUrl()
     audioBlob.value = blob
     audioUrl.value = URL.createObjectURL(blob)
     transcript.value = savedTranscript
     state.status = 'stopped'
-    state.durationMs = 0 // unknown — playback element exposes its own duration
-    accumulated = 0
+    state.durationMs = durationMs || 0
+    accumulated = durationMs || 0
     state.error = ''
   }
 
