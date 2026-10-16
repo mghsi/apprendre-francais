@@ -17,7 +17,7 @@ case "${1:-}" in
     # Build secrets do not invalidate Docker's cache when their contents change.
     export FRONTEND_ENV_HASH="$(shasum -a 256 "$ROOT/.env.local" | cut -d ' ' -f 1)"
     compose up --build --detach --wait --wait-timeout 120
-    echo "App running at http://localhost:5180"
+    echo "App running at http://localhost:5173"
     ;;
   down)
     compose down

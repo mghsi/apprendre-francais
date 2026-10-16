@@ -47,9 +47,10 @@
       <summary>Comment l’analyse est-elle sécurisée ?</summary>
       <div class="help-body">
         <p>
-          Connecte-toi pour lancer une analyse. Le texte est envoyé uniquement
-          à l’API sécurisée de l’application, qui contrôle ton identité, les
-          limites d’utilisation et l’accès au fournisseur d’IA.
+          L’analyse fonctionne sans connexion, avec un nombre limité de
+          corrections par jour. Le texte est envoyé uniquement à l’API de
+          l’application, qui applique les limites d’utilisation et contrôle
+          l’accès au fournisseur d’IA. Sans connexion, rien n’est enregistré.
         </p>
         <p>
           Aucun token de fournisseur n’est stocké dans ton navigateur. Le

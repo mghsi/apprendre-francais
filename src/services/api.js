@@ -1,4 +1,4 @@
-import { getAccessToken } from './auth.js'
+import { authState, getAccessToken } from './auth.js'
 
 const apiOrigin = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/$/, '')
 
@@ -12,13 +12,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiRequest(path, options = {}) {
-  const token = await getAccessToken()
+export async function apiRequest(path, { anonymous = false, ...options } = {}) {
+  const token = anonymous ? null : await getAccessToken()
   const response = await fetch(`${apiOrigin}${path}`, {
     ...options,
     headers: {
       accept: 'application/json',
-      authorization: `Bearer ${token}`,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...options.headers,
     },
@@ -28,7 +28,9 @@ export async function apiRequest(path, options = {}) {
     : await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new ApiError(
-      payload?.message || `La requête a échoué (${response.status}).`,
+      (response.status === 429 && anonymous
+        ? 'Limite quotidienne de corrections sans connexion atteinte. Connecte-toi ou réessaie demain.'
+        : payload?.message) || `La requête a échoué (${response.status}).`,
       {
         code: payload?.code,
         status: response.status,
@@ -50,6 +52,16 @@ function wait(ms) {
 }
 
 export async function runAiOperation(operation, input, { timeoutMs = 90_000 } = {}) {
+  // Corrections also work signed out; the API runs them synchronously with a per-IP cap.
+  if (operation === 'correction' && !authState.authenticated) {
+    const response = await apiRequest('/v1/public/ai/corrections', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      anonymous: true,
+    })
+    return response.result
+  }
+
   const created = await apiRequest(aiPaths[operation], {
     method: 'POST',
     body: JSON.stringify(input),

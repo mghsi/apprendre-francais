@@ -23,6 +23,8 @@ const schema = z.object({
   CLAUDE_CODE_OAUTH_TOKEN: z.string().optional(),
   AI_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   AI_DAILY_JOBS_PER_USER: z.coerce.number().int().min(1).max(1000).default(20),
+  AI_ANONYMOUS_CORRECTIONS: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  AI_ANONYMOUS_CORRECTIONS_PER_IP_DAILY: z.coerce.number().int().min(1).max(1000).default(20),
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(45000),
   AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
 }).strict()

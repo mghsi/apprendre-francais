@@ -14,7 +14,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/apprendre_francais
-      CORS_ORIGINS: http://localhost:5180
+      CORS_ORIGINS: http://localhost:5173
     command: ["node", "dist/db/migrate.js"]
     depends_on:
       postgres:
@@ -52,7 +52,7 @@ services:
         FRONTEND_ENV_HASH: ${FRONTEND_ENV_HASH:-}
       secrets: [frontend-env]
     ports:
-      - "127.0.0.1:5180:80"
+      - "127.0.0.1:5173:80"
     restart: unless-stopped
     depends_on:
       api:

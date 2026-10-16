@@ -39,7 +39,7 @@ With Docker Desktop running and `apps/api/.env` and `.env.local` configured
 ./cdd down     # Remove containers/network, preserving database data
 ```
 
-Open http://localhost:5180. The frontend, API, AI worker, and PostgreSQL run
+Open http://localhost:5173. The frontend, API, AI worker, and PostgreSQL run
 locally in containers; no local Node.js installation is needed for this mode.
 Auth0 and the configured AI provider remain external services.
 
@@ -51,7 +51,7 @@ Auth0 and the configured AI provider remain external services.
 
 The launcher reuses the existing `api` Compose project and database volume.
 Stop any separately running Vite process before starting it: both use port
-5180. The API is internal to Docker, with `/v1` proxied through the frontend.
+5173. The API is internal to Docker, with `/v1` proxied through the frontend.
 Container database and networking settings override the host values in
 `apps/api/.env`; the remaining settings are preserved. Frontend configuration
 comes from `.env.local`, with `VITE_API_ORIGIN` forced to the same origin.
@@ -86,7 +86,7 @@ VITE_AUTH0_CLIENT_ID=your-spa-client-id
 VITE_AUTH0_AUDIENCE=https://api.example.com/
 ```
 
-For Auth0 local development, allow exactly `http://localhost:5180` as the SPA
+For Auth0 local development, allow exactly `http://localhost:5173` as the SPA
 callback URL, logout URL, and web origin.
 
 Run the three processes in separate terminals:

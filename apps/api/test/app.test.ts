@@ -6,7 +6,7 @@ import type { User, UserRepository } from '../src/types.js'
 const config: Config = {
   NODE_ENV: 'test', HOST: '127.0.0.1', PORT: 3000, LOG_LEVEL: 'silent', DATABASE_URL: 'postgres://unused',
   CORS_ORIGINS: ['https://app.example.com'], AUTH0_ISSUER: 'https://tenant.example.com/', AUTH0_AUDIENCE: 'api', TRUST_PROXY: false,
-  LLM_PROVIDER:'mock',LLM_MODEL:'mock-local',LLM_API_KEY:'',AI_ENABLED:true,AI_DAILY_JOBS_PER_USER:20,AI_TIMEOUT_MS:45000,AI_MAX_ATTEMPTS:3,
+  LLM_PROVIDER:'mock',LLM_MODEL:'mock-local',LLM_API_KEY:'',AI_ENABLED:true,AI_DAILY_JOBS_PER_USER:20,AI_ANONYMOUS_CORRECTIONS:true,AI_ANONYMOUS_CORRECTIONS_PER_IP_DAILY:2,AI_TIMEOUT_MS:45000,AI_MAX_ATTEMPTS:3,
 }
 const user: User = { id: '78c9eed4-1317-49a1-b1b0-e7718f699871', preferences: { theme: 'system', locale: 'fr' }, status: 'active', createdAt: new Date('2026-01-01T00:00:00Z') }
 const repo = (): UserRepository => ({ provision: vi.fn(async () => user), updatePreferences: vi.fn(async (_id, preferences) => ({ ...user, preferences })), requestDeletion: vi.fn(async () => {}), ping: vi.fn(async () => {}), close: vi.fn(async () => {}) })
@@ -78,6 +78,21 @@ describe('API foundation', () => {
     })
     expect(accepted.statusCode).toBe(202)
     expect(users.requestDeletion).toHaveBeenCalledWith(user.id)
+    await app.close()
+  })
+
+  it('corrects text without sign-in and caps anonymous use per IP', async () => {
+    const verifyToken = vi.fn()
+    const provider = vi.fn(async () => ({ text: JSON.stringify({ errors: [{ original: 'des fruit', corrected: 'des fruits', explanation: 'pluriel', type: 'accord' }], suggestions: [], fully_corrected: 'J’ai acheté des fruits.' }) }))
+    const app = buildApp({ config, users: repo(), verifyToken, provider })
+    const request = () => app.inject({ method: 'POST', url: '/v1/public/ai/corrections', payload: { text: 'J’ai acheté des fruit.' } })
+    const first = await request()
+    expect(first.statusCode).toBe(200)
+    expect(first.json()).toMatchObject({ state: 'completed', result: { errors: [{ original: 'des fruit', corrected: 'des fruits' }], fullyCorrected: 'J’ai acheté des fruits.' } })
+    expect(verifyToken).not.toHaveBeenCalled()
+    expect((await request()).statusCode).toBe(200)
+    expect((await request()).statusCode).toBe(429)
+    expect(provider).toHaveBeenCalledTimes(2)
     await app.close()
   })
 })
